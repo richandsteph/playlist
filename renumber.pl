@@ -17,9 +17,10 @@
 #                                 handles
 #         1.5 -   5 Jan 2026  RAD removed unneeded unicode pragmas / added '$program_test' as possible 
 #                                 folder
+#         1.6 -   6 Jan 2026  RAD added processing of each attribute of 'song' children, when present
 #********************************************************************************************************
 
-my $Version = "1.5";
+my $Version = "1.6";
 
 use strict;
 use warnings;
@@ -29,28 +30,20 @@ use open ':std', IO => ':raw :encoding(UTF-8)';
 
 use Carp qw( croak carp );
 use Data::Dumper;
+use File::Basename qw( fileparse );
 use File::Find::utf8 qw( find );
-#-x-use Win32::Console;
 use Win32::LongPath qw( abspathL getcwdL openL );
-#-x-use Win32::Unicode::Dir;
 use XML::LibXML;
-
-#-x-#set code page
-#-x-Win32::Console::OutputCP( 65001 );
-#-x-Win32::Console::InputCP( 65001 );
-
-#-x-#set I/O to UTF-8
-#-x-binmode( STDIN, ':encoding(UTF-8)' );
-#-x-binmode( STDOUT, ':encoding(UTF-8)' );
-#-x-binmode( STDERR, ':encoding(UTF-8)' );
+use XML::Writer;
 
 my $FS = '\\';
 my $status = 1;
 
 #start logging
 my $logFH;
-my $logFile = 'renumber.log';
-$logFile =~ s#[\\\/]#$FS#g;
+my $fileName = fileparse( $0 );
+$fileName =~ s#\.\w\w\w?$##;
+my $logFile = "$fileName.log";
 startLog( $logFile );
 
 #get list of files from current directory
@@ -66,38 +59,84 @@ foreach my $xmlFile ( @fileLst ) {
 	#load XML data
 	my $xmlInFH;
 	openL( \$xmlInFH, '<:encoding(UTF-8)', $xmlFile ) or badExit( "Not able to open XML file: '$xmlFile' for input" );
-		binmode $xmlInFH;
+		binmode( $xmlInFH );
 		my $dom = XML::LibXML->load_xml( IO => $xmlInFH );
 		badExit( "\n\nCouldn't load XML file: $xmlFile" ) unless ( $dom );
-	close ( $xmlInFH );
+	close( $xmlInFH );
 
+	#create XML writer object, so can output empty XML elements without collapsing
+	my $writer = XML::Writer->new( OUTPUT => 'self', DATA_MODE => 1, DATA_INDENT => 2, UNSAFE => 1, ENCODING => 'utf-8' );
+	badExit( "Not able to create new XML::Writer object" ) if ( ! $writer );
+	#write XML Declaration
+	$writer->xmlDecl( "UTF-8" ) or badExit( "Not able to write out XML Declaration" );
+	$writer->comment( "*IMPORTANT: Only 1 attribute/value pair is allowed per each child node of <song>" );
+	
 	#cycle through number nodes
 	my $nodeCnt = 0;
 	#set date in <playlist> attribute
-	my @playlistNode = $dom->findnodes( '/playlist' );
+	my $playlistNode = $dom->findnodes( '/playlist' );
 	my $date = localtime( time() );
 	toLog( "\tSetting current date/time in <playlist> node\n" );
-	$playlistNode[0]->setAttribute( 'date', $date );
+	#get playlist @name for writing out
+	my $playlistName = $dom->findvalue( '/playlist/@name' );
+	$writer->startTag( "playlist", name => $playlistName, date => $date );
+
 	foreach my $songNode ( $dom->findnodes( '//song' ) ) {
 		#renumber node textual content
 		$nodeCnt++;
 
-		#get @number value
+		#get @number value and compare to counter, then write XML 'song' start tag
 		my $numberVal = $songNode->findvalue( './@number' );
 		if ( $numberVal !~ m#^$nodeCnt$# ) {
-			toLog( "\tNode content changed from: $numberVal to $nodeCnt\n" );
 			#change @number to new $nodeCnt
-			$songNode->setAttribute( 'number', $nodeCnt );
+			toLog( "\tNode content changed from: $numberVal to $nodeCnt\n" );
+			#write out XML 'song' element
+			$writer->startTag( "song", number => $nodeCnt );
+		} else {
+			#write out XML 'song' element
+			$writer->startTag( "song", number => $numberVal );
 		}
-	}
 
-	#write out new XML node data
+		#search empty elements and add empty node to avoid collapsed tag output
+		foreach my $subNode ( $songNode->findnodes( '*' ) ) {
+			my $nodeName = $subNode->nodeName;
+			#determine attributes for tag, can only process 1 attribute=value per $subNode
+			if ( $subNode->hasAttributes() ) {
+				#get list of attributes
+				my @nodeAtts = $subNode->attributes();
+				#format atts for start tag code
+				my ( $listAtt, $listAttVal );
+				if ( $nodeAtts[0] =~ m#\s*([^=\n]+)="([^"\n]+)"# ) {
+					$listAtt = $1;
+					$listAttVal = $2;
+				}
+				$writer->startTag( $nodeName, $listAtt => $listAttVal );
+			} else {
+				$writer->startTag( $nodeName );
+			}
+			#check each tag for empty content
+			if ( ! $subNode->hasChildNodes() ) {
+				$writer->characters( '' );
+			} else {
+				my $nodeContent = $subNode->textContent;
+				$writer->characters( $nodeContent );
+			}
+			#write each end tag
+			$writer->endTag( $nodeName );
+		}
+		#write out close 'song' XML tag
+		$writer->endTag( "song" );
+	}
+		#write out close 'playlist' XML tag
+	$writer->endTag( "playlist" );
+	$writer->end() or badExit( "Not able to end XML document" );
+
+	#write out renumbered XML playlist file
 	my $xmlOutFH;
-	openL ( \$xmlOutFH, '>:encoding(UTF-8)', $xmlFile ) or badExit( "Not able to create '$xmlFile'" );
-		my $oldfh = select $xmlOutFH; $| = 1; select $oldfh;
-		binmode $xmlOutFH;
-		$dom->toFH( $xmlOutFH );
-	close $xmlOutFH;
+	openL( \$xmlOutFH, '>:encoding(UTF-8)', $xmlFile ) or badExit( "Not able to create '" . $xmlFile . "'" );
+	my $newfh = select $xmlOutFH; $| = 1; select $newfh;
+	print $xmlOutFH $writer or badExit( "Not able to write out renumbered XML to '$xmlFile'" );
+	close( $xmlOutFH );
 	toLog( "\n...Finished renumbering XML file: '$xmlFile'\n\n\n" );
 
 	#set error status
@@ -177,7 +216,7 @@ sub startLog {
 	my $ver_info = "  Running: '$0', Version:$Version";
 	my $Sep = "-" x 120;
 
-	openL ( \$logFH, '>:encoding(UTF-8)', $log ) or badExit( "Not able to create log file\n\ttrying to create <$log>" );
+	openL( \$logFH, '>:encoding(UTF-8)', $log ) or badExit( "Not able to create log file\n\ttrying to create <$log>" );
 	open STDERR, '>>:encoding(UTF-8)', $log;
 		my $prevfh = select $logFH; $| = 1; select $prevfh;
 		#write empty line to batch file in case of file header conflict
