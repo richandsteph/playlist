@@ -10,15 +10,18 @@
 #
 #********************************************************************************************************
 # version 1.0 -  28 Feb 2024	RAD	initial creation
-#         1.1 -  23 Mar 2025  RAD removed counter from m3u entry (not needed), changed header/closing info
+#         1.1 -  23 Mar 2025  RAD removed counter from m3u entry (not needed), changed header/closing 
+#                                 info
 #         1.2 -  26 Mar 2025  RAD added quotes around artist in log
 #         1.3 -  21 Apr 2025  RAD changed logic for iterating over song data to use hashes
 #         1.4 -  16 May 2025  RAD changed to handle all unicode character issues
 #         1.5 -  22 Dec 2025  RAD added specified unicode file handling for 'openL'
 #         1.6 -  28 Dec 2025  RAD swapped artist - title output to match iTunes export
+#         1.7 -   6 Jan 2026  RAD removed unneeded Unicode pragmas / added '$' testing directory for 
+#                                 scouring
 #********************************************************************************************************
 
-my $Version = "1.6";
+my $Version = "1.7";
 
 use strict;
 use warnings;
@@ -30,19 +33,8 @@ use Carp qw( croak carp );
 use Data::Dumper;
 use File::Basename qw( fileparse );
 use File::Find::utf8 qw( find );
-use Win32::Console;
 use Win32::LongPath qw( abspathL getcwdL openL );
-#-x-use Win32::Unicode::Dir;
 use XML::LibXML;
-
-#set code page
-Win32::Console::OutputCP( 65001 );
-Win32::Console::InputCP( 65001 );
-
-#set I/O to UTF-8
-binmode( STDIN, ':encoding(UTF-8)');
-binmode( STDOUT, ':encoding(UTF-8)');
-binmode( STDERR, ':encoding(UTF-8)');
 
 my $FS = '\\';
 my $status = 1;
@@ -170,8 +162,8 @@ sub charReplace {
 #create file list from directory, check if song file, and verify not choosing files in root directory
 sub wanted {
 	my $currDir = getcwdL() or badExit( "Not able to get current directory with 'getcwdL()'" );
-	#skip directories that start with $
-	return if ( $currDir =~ m#[\\\/]\$# );
+	#skip directories that start with $, unless test directory
+	return if ( $currDir =~ m#[\\\/]\$(?!program_test)# );
 	$currDir =~ s#[\\\/]#$FS#g;
 	my $currFile = abspathL( $_ );
 	badExit( "Not able to get abspathL() for current file" ) if ( ! $currFile );
