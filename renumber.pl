@@ -17,10 +17,19 @@
 #                                 handles
 #         1.5 -   5 Jan 2026  RAD removed unneeded unicode pragmas / added '$program_test' as possible 
 #                                 folder
-#         1.6 -   6 Jan 2026  RAD added processing of each attribute of 'song' children, when present
+#         1.6 -   6 Jan 2026  RAD added processing of each attribute of 'song' children, when present / 
+#                                 added output of statuses to console / added output of "." to command 
+#                                 shell to show progress when crawling directories
+#         1.7 -   8 Jan 2026  RAD changed scalar $playlistName to array @playlistName (better coding) / 
+#                                 added output of duplicate <title> content to log
+#
+#
+#   TO-DO:
+#         1) account for duplicate XML nodes
+#
 #********************************************************************************************************
 
-my $Version = "1.6";
+my $Version = "1.7";
 
 use strict;
 use warnings;
@@ -55,6 +64,9 @@ find( \&wanted, @workDir );
 #loop through each XML file in directory
 foreach my $xmlFile ( @fileLst ) {
 	toLog( "...Processing XML File: '$xmlFile'\n\n" );
+	#echo status to console
+	binmode( STDOUT, ":encoding(UTF-8)" );
+	print "\n   Processing '$xmlFile'\n";
 
 	#load XML data
 	my $xmlInFH;
@@ -69,7 +81,7 @@ foreach my $xmlFile ( @fileLst ) {
 	badExit( "Not able to create new XML::Writer object" ) if ( ! $writer );
 	#write XML Declaration
 	$writer->xmlDecl( "UTF-8" ) or badExit( "Not able to write out XML Declaration" );
-	$writer->comment( "*IMPORTANT: Only 1 attribute/value pair is allowed per each child node of <song>" );
+	$writer->comment( "*IMPORTANT*: Only 1 attribute/value pair is allowed per each child node of <song>" );
 	
 	#cycle through number nodes
 	my $nodeCnt = 0;
@@ -78,8 +90,10 @@ foreach my $xmlFile ( @fileLst ) {
 	my $date = localtime( time() );
 	toLog( "\tSetting current date/time in <playlist> node\n" );
 	#get playlist @name for writing out
-	my $playlistName = $dom->findvalue( '/playlist/@name' );
-	$writer->startTag( "playlist", name => $playlistName, date => $date );
+	my @playlistName = $dom->findvalue( '/playlist/@name' );
+	$writer->startTag( "playlist", name => $playlistName[0], date => $date );
+
+	my %title;
 
 	foreach my $songNode ( $dom->findnodes( '//song' ) ) {
 		#renumber node textual content
@@ -100,7 +114,19 @@ foreach my $xmlFile ( @fileLst ) {
 		#search empty elements and add empty node to avoid collapsed tag output
 		foreach my $subNode ( $songNode->findnodes( '*' ) ) {
 			my $nodeName = $subNode->nodeName;
-			#determine attributes for tag, can only process 1 attribute=value per $subNode
+			#determine if <title> has duplicate content with another node
+			if ( $nodeName =~ m#^title$#i ) {
+				my $titleContent = $subNode->textContent;
+				foreach my $val ( values( %title ) ) {
+					if ( $val =~ m#^$titleContent$#i ) {
+						toLog( "\tNOTE: The content '" . $titleContent . "' of <title> in <song> no. " . $nodeCnt . " is duplicated\n" );
+						#-x-$writer->comment( "NOTE: <title> in <song> no. $nodeCnt is duplicated" );
+					}
+				}
+				#store current <title> content in hash for checking against other nodes
+				$title{$nodeCnt} = $titleContent;
+			}
+			#determine attributes for tag, **can only process 1 attribute=value per $subNode**
 			if ( $subNode->hasAttributes() ) {
 				#get list of attributes
 				my @nodeAtts = $subNode->attributes();
@@ -143,6 +169,10 @@ foreach my $xmlFile ( @fileLst ) {
 	$status = 0;
 }
 
+#echo status to console
+if ( ! $status ) {
+	print "\n...Finished Processing Successfully\n\n";
+}
 #end log file
 endLog( $status );
 exit;
@@ -183,8 +213,10 @@ sub charReplace {
 
 #create file list from directory, check if song file, and verify not choosing files in root directory
 sub wanted {
+	#send notice of folder processing to console
+	print ".";
 	my $currDir = getcwdL() or badExit( "Not able to get current directory with 'getcwdL()'" );
-	#skip directories that start with $
+	#skip directories that start with $, unless testing directory
 	return if ( $currDir =~ m#[\\\/]\$(?!program_test)# );
 	$currDir =~ s#[\\\/]#$FS#g;
 	my $currFile = abspathL( $_ );
