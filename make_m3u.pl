@@ -18,10 +18,17 @@
 #         1.5 -  22 Dec 2025  RAD added specified unicode file handling for 'openL'
 #         1.6 -  28 Dec 2025  RAD swapped artist - title output to match iTunes export
 #         1.7 -   6 Jan 2026  RAD removed unneeded Unicode pragmas / added '$' testing directory for 
-#                                 scouring
+#                                 scouring /added output of statuses to console / added output of "." 
+#                                 to command shell to show progress when crawling directories
+#         1.8 -   6 Jan 2026  RAD added output of $title, $seconds, $artist when fails to populate
+#
+#
+#   TO-DO:
+#         1) none
+#
 #********************************************************************************************************
 
-my $Version = "1.7";
+my $Version = "1.8";
 
 use strict;
 use warnings;
@@ -54,7 +61,11 @@ find( \&wanted, @workDir );
 
 #loop through each XML file in directory
 foreach my $xmlFile ( @fileLst ) {
-	toLog( "...Processing XML File: '$xmlFile'\n\n" );
+	toLog( "...Processing XML file: '$xmlFile'\n\n" );
+	#echo status to console
+	binmode( STDOUT, ":encoding(UTF-8)" );
+	print "\n   Processing '$xmlFile'\n";
+
 
 	#load XML data
 	my $xmlFH;
@@ -93,7 +104,7 @@ foreach my $xmlFile ( @fileLst ) {
 		$m3uNum{$path} = ( $songNode->findvalue( './@number' ) );
 		
 		#exit if no .m3u data found
-		badExit( "No .m3u entry made, current entry path: '" . $path . "'" ) unless ( $seconds && $title && $artist && $path );
+		badExit( "No .m3u entry made, current entry path: '" . $path . "', title: '" . $title . "', artist: '" . $artist . "', seconds: '" . $seconds . "'" ) unless ( $seconds && $title && $artist && $path );
 		#add to m3u hash keyed by path
 		$m3uSort{$path} = '#EXTINF:' . $seconds . ',' . $title . ' - ' . $artist . "\n" . $path . "\n";
 		$m3uTitle{$path} = $title;
@@ -121,6 +132,10 @@ foreach my $xmlFile ( @fileLst ) {
 	$status = 0;
 }
 
+#echo status to console
+if ( ! $status ) {
+	print "\n...Finished Processing Successfully\n\n";
+}
 #end log file
 endLog( $status );
 exit;
@@ -161,6 +176,8 @@ sub charReplace {
 
 #create file list from directory, check if song file, and verify not choosing files in root directory
 sub wanted {
+	#send notice of folder processing to console
+	print ".";
 	my $currDir = getcwdL() or badExit( "Not able to get current directory with 'getcwdL()'" );
 	#skip directories that start with $, unless test directory
 	return if ( $currDir =~ m#[\\\/]\$(?!program_test)# );
