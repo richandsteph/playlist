@@ -83,6 +83,11 @@
 #                                  binmode() for STDOUT (need to write unicode to console updates) / 
 #                                  removed binmode()'s from header / changed location of ExifTool to 
 #                                  Strawberry Perl version
+#         1.19 -   6 Jan 2026  RAD added Carp module w/ longmess / added 'chcp 65001' command to batch 
+#                                  files / added 'chcp 65001' to batch files for running Unicode filenames 
+#                                  / added batch file to set console code page in command shell for output 
+#                                  of progress status
+#         1.20 -  10 Jan 2026  RAD added if statement to check $status before echoing finished to console
 #
 #
 #   TO-DO:
@@ -90,7 +95,7 @@
 #
 #**********************************************************************************************************
 
-my $Version = "1.18";
+my $Version = "1.19";
 
 use strict;
 use warnings;
@@ -98,6 +103,7 @@ use utf8::all;
 use feature 'unicode_strings';
 use open ':std', IO => ':raw :encoding(UTF-8)';
 
+use Carp qw( carp croak longmess );
 use Data::Dumper qw( Dumper );
 use File::Basename qw( fileparse );
 #specify config file for ExifTool
@@ -163,6 +169,30 @@ my @listOfID3Tags = (
 	'Duration'
 );
 
+#start process to create batch file for calling 'chcp 65001' for files/folders with Unicode characters
+my $statBat = $ENV{TEMP} . $FS . 'stat' . '.bat';
+my $statBatFH;
+#open/close batch file with commands written to it
+toLog( " - Creating batch file wrapper set console code page: '" . $statBat . "'\n" );
+openL( \$statBatFH, '>:encoding(UTF-8)', $statBat ) or badExit( "Not able to create temporary batch file to set console code page: $^E, $!" );
+	my $statFH = select $statBatFH; $| = 1; select $statFH;
+	print $statBatFH "\n" . '@echo off' . "\n" . 'echo   **Setting Console Code Page to 65001**' . "\n" . 'chcp 65001';
+close( $statBatFH );
+
+#execute batch file wrapper to set console code page
+toLog( " - Executing batch file to set console code page\n" );
+my $outErr;
+run3( $statBat, \undef, \$outErr, \$outErr );
+badExit( "Not able to run set console code page batch file wrapper: '" . $statBat . "', returned: " . $? . ", and: " . $outErr ) if ( $? );
+
+#clean up batch file
+toLog( " - Cleaning up temporary console code page batch file\n" );
+if ( testL( 'e', $statBat ) ) {
+	unlinkL( $statBat ) or badExit( "Not able to remove temporary console code page batch file: '" . $statBat . "': $^E, $!" );
+} else {
+	badExit( "No console code page batch file to delete: $^E, $!" );
+}
+
 #set overall counter for songs
 my $num = 0;
 #loop through each song file in file list
@@ -209,10 +239,10 @@ foreach my $songFile ( @fileLst ) {
 		'Year'
 	);
 
-	toLog( 'Processing song file: "' . $songFile . "\"...\n" );
 	#echo status to console
+	toLog( 'Processing song file: "' . $songFile . "\"...\n" );
 	binmode( STDOUT, ":encoding(UTF-8)" );
-	print "   Processing '$songFile'\n";
+	print "\n   Processing '$songFile'\n";
 
 	#set per song hash for tag metadata
 	my %tags;
@@ -235,12 +265,12 @@ foreach my $songFile ( @fileLst ) {
 
 		#start process to create batch file for calling 'mkvextract' for files/folders with Unicode characters
 		my $mkvBat = $ENV{TEMP} . $FS . 'mkv-' . $num . '.bat';
-		my ( $mkvBatFH, $mkvFH );
+		my $mkvBatFH;
 		#open/close batch file with commands written to it
 		toLog( " - Creating batch file wrapper for 'mkvextract': '" . $mkvBat . "'\n" );
 		openL( \$mkvBatFH, '>:encoding(UTF-8)', $mkvBat ) or badExit( "Not able to create temporary batch file to run 'mkvextract': $^E, $!" );
 			my $oldFH = select $mkvBatFH; $| = 1; select $oldFH;
-			print $mkvBatFH "\n" . 'call ' . join( " ", @mkvArgs );
+			print $mkvBatFH "\n" . 'chcp 65001' . "\n" . 'call ' . join( " ", @mkvArgs );
 		close( $mkvBatFH );
 
 		#execute batch file wrapper to call 'mkvextract' command batch file
@@ -319,7 +349,7 @@ foreach my $songFile ( @fileLst ) {
 		toLog( " - Creating batch file wrapper for 'exiftool': '" . $jsonBat . "'\n" );
 		openL( \$jsonBatFH, '>:encoding(UTF-8)', $jsonBat ) or badExit( "Not able to create temporary batch file to run 'exiftool': $^E, $!" );
 			my $oldFH = select $jsonBatFH; $| = 1; select $oldFH;
-			print $jsonBatFH "\n" . 'call ' . join( " ", @exifToolArgs );
+			print $jsonBatFH "\n" . 'chcp 65001' . "\n" . 'call ' . join( " ", @exifToolArgs );
 		close( $jsonBatFH );
 		#open/close 'exiftool' args file with arguments written to it
 		toLog( " - Creating argument file for 'exiftool': '" . $exifToolArgsFile . "'\n" );
@@ -688,7 +718,7 @@ foreach my $songFile ( @fileLst ) {
 		openL( \$ffprobeFH, '>:encoding(UTF-8)', $ffprobeBat ) or badExit( "Not able to create temporary batch file to run 'ffprobe': $^E, $!" );
 			my $oldfh = select $ffprobeFH; $| = 1; select $oldfh;
 			#write empty line to batch file in case of file header conflict
-			print $ffprobeFH "\n" . 'call ' . join( " ", @ffprobeCmd );
+			print $ffprobeFH "\n" . 'chcp 65001' . "\n" . 'call ' . join( " ", @ffprobeCmd );
 		close( $ffprobeFH );
 		toLog( " - Executing 'ffprobe' batch file\n" );
 		run3( $ffprobeBat, \undef, \$duration );
@@ -791,7 +821,7 @@ foreach my $songFile ( @fileLst ) {
 	openL( \$ffmpegFH, '>:encoding(UTF-8)', $ffmpegBat ) or badExit( "Not able to create temporary batch file to run 'ffmpeg': $^E, $!" );
 		my $prevfh = select $ffmpegFH; $| = 1; select $prevfh;
 		#write empty line to batch file in case of file header conflict
-		print $ffmpegFH "\n" . 'call ' . join( " ", @ffmpeg );
+		print $ffmpegFH "\n" . 'chcp 65001' . "\n" . 'call ' . join( " ", @ffmpeg );
 	close( $ffmpegFH );
 
 	#execute batch file wrapper to call 'ffmpeg' commands batch file
@@ -929,7 +959,9 @@ $status = 0;
 #end log file
 endLog( $status );
 #echo status to console
-print "\n...Finished Processing\n\n";
+if ( ! $status ) {
+	print "\n...Finished Processing Successfully\n\n";
+}
 exit;
 
 #set array of tags to lowercase keys for easier processing of XML output
@@ -966,6 +998,8 @@ sub convertDuration {
 #get file list from working directory
 sub getFileLst {
 	my $working = $_[0];
+	#send notice of folder processing to console
+	print ".";
 	#don't scour '$' folders, unless for testing
 	return if ( $working =~ m#[\\\/]\$(?!program_test)# );
 
