@@ -87,7 +87,8 @@
 #                                  files / added 'chcp 65001' to batch files for running Unicode filenames 
 #                                  / added batch file to set console code page in command shell for output 
 #                                  of progress status
-#         1.20 -  10 Jan 2026  RAD added if statement to check $status before echoing finished to console
+#         1.20 -  10 Jan 2026  RAD added if statement to check $status before echoing finished to console /
+#                                  added shortmess() to pragmas
 #
 #
 #   TO-DO:
@@ -103,7 +104,7 @@ use utf8::all;
 use feature 'unicode_strings';
 use open ':std', IO => ':raw :encoding(UTF-8)';
 
-use Carp qw( carp croak longmess );
+use Carp qw( carp croak longmess shortmess );
 use Data::Dumper qw( Dumper );
 use File::Basename qw( fileparse );
 #specify config file for ExifTool
