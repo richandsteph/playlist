@@ -11,7 +11,7 @@
 #	  	rich@richandsteph.com
 #
 #**********************************************************************************************************
-# version 1.0  -  26 Mar 2025	RAD	initial creation
+# version 1.0  -  26 Mar 2025	 RAD initial creation
 #         1.1  -  28 Mar 2025  RAD added match pattern for single album folder (no artist), adjusted match 
 #                                  pattern for song file title to include negative lookahead for 
 #                                  "\Music" for artist that start with number
@@ -96,6 +96,10 @@
 #                                  <date> to <year> / changed use of <duration> to <length> / removed 
 #                                  check for 'phone_music' folder to set paths to phone folders / renamed 
 #                                  lowerCase() to lowerHashCase()
+#          2.1 -  18 Jan 2026  RAD reordered output of XML nodes to ordered list in 'update_ID3_tags.pl' / 
+#                                  set all tag names to uniform lowercase / removed 'ensemble' tag / added 
+#                                  updated -charset encoding arguments to 'exiftool' / edited clean up of 
+#                                  tags
 #
 #
 #   TO-DO:
@@ -103,7 +107,7 @@
 #
 #**********************************************************************************************************
 
-my $Version = "2.0";
+my $Version = "2.1";
 
 use strict;
 use warnings;
@@ -169,12 +173,12 @@ $writer->startTag( "playlist", name => $playlist_name, date => $date );
 
 #list of ID3 verified tag names
 my @listOfID3Tags = (
-	'Title',
-	'Track',
-	'Artist',
-	'Album',
-	'AlbumArtist',
-	'Length'
+	'track',
+	'title',
+	'artist',
+	'albumartist',
+	'album',
+	'length'
 );
 
 #start process to create batch file for calling 'chcp 65001' for files/folders with Unicode characters
@@ -209,41 +213,35 @@ foreach my $songFile ( @fileLst ) {
 	++$num;
 	#list of ID3 possible tag names
 	my @listOfAllTags = (
-		'AlbumArtistSort',
-		'Albumartistsort',
-		'AlbumArtist',
-		'Albumartist',
-		'albumartist',
 		'album_artist',
-		'Album',
-		'ArtistSort',
-		'Artistsort',
-		'Artist',
-		'AudioBitrate',
-		'Bitrate',
+		'albumartistsortorder',
+		'albumartistsort',
+		'albumartist',
+		'album',
+		'artistsortorder',
+		'artistsort',
+		'artist',
+		'audiobitrate',
 		'bit_rate',
-		'Comment',
-		'DateTimeOriginal',
-		'Date',
-		'DiscNumber',
-		'Discnumber',
-		'Disc',
-		'Ensemble',
-		'Genre',
-		'Length',
-		'Minutes',
-		'OriginalDate',
-		'OriginalReleaseYear',
-		'PartOfSet',
-		'Partofset',
-		'Path',
-		'Title',
-		'TrackID',
-		'TrackNumber',
-		'Tracknumber',
+		'bitrate',
+		'comment',
+		'datetimeoriginal',
+		'date',
+		'discnumber',
+		'disc',
+		'ensemble',
+		'genre',
+		'length',
+		'minutes',
+		'originaldate',
+		'originalreleaseyear',
+		'partofset',
+		'path',
+		'title',
+		'trackid',
 		'tracknumber',
-		'Track',
-		'Year'
+		'track',
+		'year'
 	);
 
 	#echo status to console
@@ -335,8 +333,14 @@ foreach my $songFile ( @fileLst ) {
 			'>"' . $songFileJson . '"'
 		);
 		my @exifToolFileArgs = (
-			#set encoding for filenames, also sets wide-character I/O
-			'-charset' . "\n" . 'FileName=UTF8' . "\n",
+		#set encoding for filenames, also sets wide-character I/O
+		'-charset' . "\n" . 'filename=UTF8' . "\n",
+		#set encoding for IPTC values
+		'-charset' . "\n" . 'exif=UTF8' . "\n",
+		#set encoding for exifTool
+		'-charset' . "\n" . 'exiftool=UTF8' . "\n",
+		#set encoding of ID3 metadata
+		'-charset' . "\n" . 'id3=UTF8' . "\n",
 			#allow duplicate tags
 			'-duplicates' . "\n",
 			#quiet processing
@@ -402,78 +406,60 @@ foreach my $songFile ( @fileLst ) {
 	foreach my $key ( keys %tags ) {
 		#set 'album artist' if not specified
 		if ( $key =~ m#^artist$#i ) {
-			if ( ! $tags{AlbumArtist} ) {
-				if ( $tags{Albumartist} ) {
-					$tags{AlbumArtist} = $tags{Albumartist};
-					#remove for preferred 'albumartist' key
-					delete $tags{Albumartist};
-				} elsif ( $tags{albumartist} ) {
-					$tags{AlbumArtist} = $tags{albumartist};
-					#remove for preferred 'albumartist' key
-					delete $tags{albumartist};
-				} elsif ( $tags{album_artist} ) {
-					$tags{AlbumArtist} = $tags{album_artist};
-					#remove for preferred 'albumartist' key
-					delete $tags{album_artist};
-				} else {
-					$tags{AlbumArtist} = $tags{$key};
-				}
-			}
 			#correct previous error in diagnostic testing for 'AC/DC'
 			$tags{$key} =~ s#^AC[_ ]DC$#AC\/DC#i;
-			#remove extra artist info
-			$tags{AlbumArtist} =~ s#^([^;]+)(?<!&amp);.*$#$1#;
-			#correct previous error in diagnostic testing for 'AC/DC'
-			$tags{AlbumArtist} =~ s#^AC[_ ]DC$#AC\/DC#i;
-			#set 'album artist sort' if not specified
-			if ( ! $tags{AlbumArtistSort} ) {
-				if ( $tags{Albumartistsort} ) {
-					$tags{AlbumArtistSort} = $tags{Albumartistsort};
-					#remove for preferred 'albumartistsort' key
-					delete $tags{Albumartistsort};
-				} else {
-					$tags{AlbumArtistSort} = $tags{AlbumArtist};
-					#strip starting articles
-					$tags{AlbumArtistSort} =~ s#^(the|a|an)\s+(.+)#$2#i;
-				}
-			}
-			#set 'artist sort' if not specified
-			if ( ! $tags{ArtistSort} ) {
-				if ( $key =~ m#Artistsort# ) {
-					$tags{ArtistSort} = $tags{Artistsort};
-					#remove for preferred 'artistsort' key
-					delete $tags{Artistsort};
-				} else {
-					$tags{ArtistSort} = $tags{$key};
+			if ( ! $tags{albumartist} ) {
+				if ( $tags{album_artist} ) {
+					$tags{albumartist} = $tags{album_artist};
 					#remove extra artist info
-					$tags{ArtistSort} =~ s#^([^;]+)(?<!&amp);.*$#$1#;
+					$tags{albumartist} =~ s#^([^;]+)(?<!&amp);.*$#$1#;
 					#correct previous error in diagnostic testing for 'AC/DC'
-					$tags{ArtistSort} =~ s#^AC[_ ]DC$#AC\/DC#i;
-					#strip starting articles
-					$tags{ArtistSort} =~ s#^(the|a|an)\s+(.+)#$2#i;
+					$tags{albumartist} =~ s#^AC[_ ]DC$#AC\/DC#i;
+					#remove for preferred 'albumartist' key
+					delete $tags{album_artist};
 				}
+			} else {
+				$tags{albumartist} = $tags{$key};
+					#remove extra artist info
+					$tags{albumartist} =~ s#^([^;]+)(?<!&amp);.*$#$1#;
 			}
-			#set 'ensemble' if not specified
-			if ( ! $tags{Ensemble} ) {
-				$tags{Ensemble} = $tags{$key};
-			}
+		}
+		#remove extra artist info
+		$tags{albumartist} =~ s#^([^;]+)(?<!&amp);.*$#$1#;
+		#clean up 'albumartistsort'
+		if ( $tags{albumartistsortorder} ) {
+			#remove extra artist info
+			$tags{albumartistsortorder} =~ s#^([^;]+)(?<!&amp);.*$#$1#;
+			#correct previous error in diagnostic testing for 'AC/DC'
+			$tags{albumartistsortorder} =~ s#^AC[_ ]DC$#AC\/DC#i;
+			#strip starting articles
+			$tags{albumartistsortorder} =~ s#^(the|a|an)\s+(.+)#$2#i;
+		}
+		#clean up 'artistsort'
+		if ( $tags{artistsortorder} ) {
+			#remove extra artist info
+			$tags{artistsortorder} =~ s#^([^;]+)(?<!&amp);.*$#$1#;
+			#correct previous error in diagnostic testing for 'AC/DC'
+			$tags{artistsortorder} =~ s#^AC[_ ]DC$#AC\/DC#i;
+			#strip starting articles
+			$tags{artistsortorder} =~ s#^(the|a|an)\s+(.+)#$2#i;
 		}
 		#'track' value keyed as 'track id' or 'tracknumber'
 		if ( ( $key =~ m#^tracknumber$#i ) || ( $key =~ m#^trackid$#i ) ) {
-			if ( ! $tags{Track} ) {
+			if ( ! $tags{track} ) {
 				#prefer 'track number' over 'track id'
 				if ( $key =~ m#^tracknumber$#i ) {
-					$tags{Track} = $tags{$key};
+					$tags{track} = $tags{$key};
 				} elsif ( $key =~ m#^trackid$#i ) {
-					$tags{Track} = $tags{$key};
+					$tags{track} = $tags{$key};
 				}
 			}
 			delete $tags{$key};
 		}
 		#'discnumber' value keyed as 'partofset', but keep 'part of set' - is listed as standard tag for ID3v2.3
-		if ( $key =~ m#^PartOfSet$# ) {
-			if ( ! $tags{Discnumber} ) {
-				$tags{Discnumber} = $tags{$key};
+		if ( $key =~ m#^partofset$# ) {
+			if ( ! $tags{discnumber} ) {
+				$tags{discnumber} = $tags{$key};
 			}
 		}
 		#remove duplicates, etc. from 'year' value
@@ -481,10 +467,10 @@ foreach my $songFile ( @fileLst ) {
 			#remove duplicate
 			$tags{$key} =~ s#^(\d\d\d\d).*$#$1#;
 			#if 'date' not equal 'year', use 'date' value
-			if ( ( $tags{Date} ) && ( $tags{Date} !~ m#^$tags{$key}$# ) ) {
-				$tags{$key} = $tags{Date};
+			if ( ( $tags{date} ) && ( $tags{date} !~ m#^$tags{$key}$# ) ) {
+				$tags{$key} = $tags{date};
 			} else {
-				$tags{Date} = $tags{$key};
+				$tags{date} = $tags{$key};
 			}
 			if ( $tags{$key} =~ m#^$# ) {
 				delete $tags{$key};
@@ -494,49 +480,35 @@ foreach my $songFile ( @fileLst ) {
 		if ( $key =~ m#^date$#i ) {
 			#remove duplicate
 			$tags{$key} =~ s#^(\d\d\d\d).*$#$1#;
-			#if 'date' not equal to 'year', use 'date' value
-			if ( ( $tags{Year} ) && ( $tags{Year} !~ m#^$tags{$key}$# ) ) {
-				$tags{Year} = $tags{$key};
-			} elsif ( ( ! $tags{Year} ) && ( $tags{$key} !~ m#^$# ) ) {
+			if ( ( ! $tags{year} ) && ( $tags{$key} !~ m#^$# ) ) {
 				#add 'year' key for 'date' value
-				$tags{Year} = $tags{$key};
+				$tags{year} = $tags{$key};
 			}
+			delete $tags{date};
 		}
 		#'year' value keyed as 'original release year', but keep 'original release year' - is listed as standard tag for ID3v2.3
 		if ( $key =~ m#^originalreleaseyear$#i ) {
 			#remove duplicate
 			$tags{$key} =~ s#^(\d\d\d\d).*$#$1#;
-			if ( ! $tags{Date} ) {
-				$tags{Date} = $tags{$key};
+			if ( ! $tags{year} ) {
+				$tags{year} = $tags{$key};
 			}
-			if ( ! $tags{Year} ) {
-				$tags{Year} = $tags{$key};
-			}
-			delete $tags{$key};
 		}
 		#'year' value keyed as 'original date'
 		if ( $key =~ m#^originaldate$#i ) {
 			#remove duplicate
 			$tags{$key} =~ s#^(\d\d\d\d).*$#$1#;
-			if ( ! $tags{Date} ) {
-				$tags{Date} = $tags{$key};
+			if ( ! $tags{year} ) {
+				$tags{year} = $tags{$key};
 			}
-			if ( ! $tags{Year} ) {
-				$tags{Year} = $tags{$key};
-			}
-			delete $tags{$key};
 		}
 		#'year' value keyed as 'DateTimeOriginal'
 		if ( $key =~ m#^datetimeoriginal$#i ) {
 			#remove duplicate
 			$tags{$key} =~ s#^(\d\d\d\d).*$#$1#;
-			if ( ! $tags{Date} ) {
-				$tags{Date} = $tags{$key};
+			if ( ! $tags{year} ) {
+				$tags{year} = $tags{$key};
 			}
-			if ( ! $tags{Year} ) {
-				$tags{Year} = $tags{$key};
-			}
-			delete $tags{$key};
 		}
 		#'bitrate' needs some format checks
 		if ( $key =~ m#^bitrate$#i ) {
@@ -551,7 +523,7 @@ foreach my $songFile ( @fileLst ) {
 		}
 		#'bitrate' value keyed as 'bit_rate'
 		if ( $key =~ m#^bit_rate$#i ) {
-			if ( ! $tags{Bitrate} ) {
+			if ( ! $tags{bitrate} ) {
 				#match at least 6 digits (for 1,000's), but also capture any trailing digits but leaving the rest off)
 				if ( $tags{$key} =~ s#^(\d{6}\d*).*$#$1# ) {
 					$tags{$key} = $tags{$key} / 1000;
@@ -560,13 +532,13 @@ foreach my $songFile ( @fileLst ) {
 					#strip any extraneous characters from digits otherwise
 					$tags{$key} =~ s#^(\d+).*$#$1#;
 				}
-				$tags{Bitrate} = $tags{$key};
+				$tags{bitrate} = $tags{$key};
 			}
 			delete $tags{$key};
 		}
 		#'bitrate' value keyed as 'AudioBitrate'
 		if ( $key =~ m#^audiobitrate$#i ) {
-			if ( ! $tags{Bitrate} ) {
+			if ( ! $tags{bitrate} ) {
 				#match at least 6 digits (for 1,000's), but also capture any trailing digits but leaving the rest off)
 				if ( $tags{$key} =~ s#^(\d{6}\d*).*$#$1# ) {
 					$tags{$key} = $tags{$key} / 1000;
@@ -575,7 +547,7 @@ foreach my $songFile ( @fileLst ) {
 					#strip any extraneous characters from digits otherwise
 					$tags{$key} =~ s#^(\d+).*$#$1#;
 			}
-				$tags{Bitrate} = $tags{$key};
+				$tags{bitrate} = $tags{$key};
 			}
 			delete $tags{$key};
 		}
@@ -587,8 +559,8 @@ foreach my $songFile ( @fileLst ) {
 		}
 		#if 'comment' value stored in 'comment-xxx'
 		if ( $key =~ m#^comment-xxx$#i ) {
-			if ( ! $tags{Comment} ) {
-				$tags{Comment} = $tags{$key} unless ( ( $tags{$key} =~ m#created from filename#i ) || ( $tags{$key} =~ m#updated with default#i ) || ( $tags{$key} =~ m#^vendor$#i ) || ( $tags{$key} =~ m#^\s+$#i ) );
+			if ( ! $tags{comment} ) {
+				$tags{comment} = $tags{$key} unless ( ( $tags{$key} =~ m#created from filename#i ) || ( $tags{$key} =~ m#updated with default#i ) || ( $tags{$key} =~ m#^vendor$#i ) || ( $tags{$key} =~ m#^\s+$#i ) );
 			}
 			delete $tags{$key};
 		}
@@ -614,18 +586,18 @@ foreach my $songFile ( @fileLst ) {
 			}
 			#set value for 'minutes' in MM:SS
 			$minutes = $seconds / 60;
-			$minutes = sprintf "%.02d", $minutes;
+			$minutes = sprintf "%d", $minutes;
 			my $remSecs = $seconds - ( $minutes * 60 );
 			$remSecs = sprintf "%.02d", $remSecs;
 			#delete existing 'minutes' - diagnostic testing caused several erroneous calcs for minutes
-			if ( exists $tags{Minutes} ) {
-				delete $tags{Minutes};
+			if ( exists $tags{minutes} ) {
+				delete $tags{minutes};
 			}
-			$tags{Minutes} = $minutes . ':' . $remSecs;
+			$tags{minutes} = $minutes . ':' . $remSecs;
 		}
 		#'length' value keyed as 'duration'
 		if ( $key =~ m#^duration$#i ) {
-			if ( ! $tags{Length} ) {
+			if ( ! $tags{length} ) {
 				if ( $tags{$key} =~ m#^0\.# ) {
 					delete $tags{$key};
 				} else {
@@ -638,64 +610,65 @@ foreach my $songFile ( @fileLst ) {
 					}
 					#set value for 'minutes' in MM:SS
 					$minutes = $seconds / 60;
-					$minutes = sprintf "%.02d", $minutes;
+					$minutes = sprintf "%d", $minutes;
 					my $remSecs = $seconds - ( $minutes * 60 );
 					$remSecs = sprintf "%.02d", $remSecs;
 					#delete existing 'minutes' - diagnostic testing caused several erroneous calcs for minutes
-					if ( exists $tags{Minutes} ) {
-						delete $tags{Minutes};
+					if ( exists $tags{minutes} ) {
+						delete $tags{minutes};
 					}
-					$tags{Minutes} = $minutes . ':' . $remSecs;
+					$tags{minutes} = $minutes . ':' . $remSecs;
 					#reset 'length' value in total seconds
-					$tags{Length} = int( $seconds );
+					$tags{length} = int( $seconds );
 				}
 			}
-			delete $tags{$key};
+			delete $tags{$key} if ( $tags{length} );
 		}
 	}
 
 	#check if crucial tags have been set, try to determine from filename & path
-	if ( ( ! $tags{Title} ) || ( ! $tags{Artist} ) || ( ! $tags{Track} ) || ( ! $tags{Album} ) || ( ! $tags{Length} ) ) {
+	if ( ( ! $tags{title} ) || ( ! $tags{artist} ) || ( ! $tags{track} ) || ( ! $tags{album} ) || ( ! $tags{length} ) ) {
 		toLog( " - <title> or <artist> (or others) have not been set, attempting to set from filename & path\n" );
 		my ( $fileName, $filePath ) = fileparse( abspathL( $songFile ) );
 		if ( $filePath =~ m#^$musicDirPath$musicDir\\([^\\]+)\\([^\\]+)\\#i ) {
 			my $artist = $1;
 			my $album = $2;
-			$tags{Artist} = $artist if ( ! $tags{Artist} );
+			#add escape '\' to square brackets for match expression
+			my $albumMatch = $album;
+			$albumMatch =~ s#([\[\]])#\\$1#g;
+			$tags{artist} = $artist if ( ! $tags{artist} );
 			#determine if directory is actually a compilation with 'Disc' folders
-			if ( ( $artist =~ m#^$album$#i ) || ( $album =~ m#^dis[ck]\s*\d+$#i ) ) {
-				$tags{Album} = $artist if ( ! $tags{Album} );
+			if ( ( $artist =~ m#^$albumMatch$#i ) || ( $album =~ m#^dis[ck]\s*\d+$#i ) ) {
+				$tags{album} = $artist if ( ! $tags{album} );
 			} else {
-				$tags{Album} = $album if ( ! $tags{Album} );
+				$tags{album} = $album if ( ! $tags{album} );
 			}
-			$tags{AlbumArtist} = $tags{Artist} if ( ! $tags{AlbumArtist} );
 			#correct previous error in diagnostic testing for 'AC/DC'
-			$tags{Artist} =~ s#^AC[_ ]DC$#AC\/DC#i;
-			$tags{Ensemble} = $tags{Artist} if ( ! $tags{Ensemble} );
-			#remove extra artist info
-			$tags{AlbumArtist} =~ s#^([^;]+)(?<!&amp);.*$#$1#;
-			#correct previous error in diagnostic testing for 'AC/DC'
-			$tags{AlbumArtist} =~ s#^AC[_ ]DC$#AC\/DC#i;
+			$tags{artist} =~ s#^AC[_ ]DC$#AC\/DC#i;
+			if ( ! $tags{albumartist} ) {
+				$tags{albumartist} = $tags{artist};
+				#remove extra artist info
+				$tags{albumartist} =~ s#^([^;]+)(?<!&amp);.*$#$1#;
+			}
 		} elsif ( $filePath =~ m#^$musicDirPath$musicDir\\([^\\]+)\\#i ) {
-			$tags{Artist} = $1 if ( ! $tags{Artist} );
-			$tags{Album} = $1 if ( ! $tags{Album} );
-			$tags{AlbumArtist} = $1 if ( ! $tags{AlbumArtist} );
+			$tags{artist} = $1 if ( ! $tags{artist} );
+			$tags{album} = $1 if ( ! $tags{album} );
+			$tags{albumartist} = $1 if ( ! $tags{albumartist} );
 			#correct previous error in diagnostic testing for 'AC/DC'
-			$tags{Artist} =~ s#^AC[_ ]DC$#AC\/DC#i;
-			$tags{Ensemble} = $tags{Artist} if ( ! $tags{Ensemble} );
+			$tags{artist} =~ s#^AC[_ ]DC$#AC\/DC#i;
 			#remove extra artist info
-			$tags{AlbumArtist} =~ s#^([^;]+)(?<!&amp);.*$#$1#;
+			$tags{albumartist} =~ s#^([^;]+)(?<!&amp);.*$#$1#;
 			#correct previous error in diagnostic testing for 'AC/DC'
-			$tags{AlbumArtist} =~ s#^AC[_ ]DC$#AC\/DC#i;
+			$tags{albumartist} =~ s#^AC[_ ]DC$#AC\/DC#i;
 		}
 
 		if ( $fileName =~ m#((\d)\-)?(\d+)\s*\-?\s+([^\\]+)\.(aac|alac|flac|m4a|mka|mkv|mp3|ogg|wma)$#i ) {
-			$tags{Title} = $4 if ( ! $tags{Title} );
-			if ( ! $tags{Track} ) {
-				$tags{Track} = $3;
+			$tags{title} = $4 if ( ! $tags{title} );
+			if ( ! $tags{track} ) {
+				$tags{track} = $3;
 			}
-			if ( ( $2 ) && ( ! $tags{Discnumber} ) ) {
-				$tags{Discnumber} = $2;
+			if ( ( $2 ) && ( ! $tags{discnumber} ) ) {
+				$tags{discnumber} = $2;
 			}
 		}
 
@@ -731,11 +704,11 @@ foreach my $songFile ( @fileLst ) {
 			$minutes = sprintf "%.02d", $minutes;
 			my $remSecs = $duration - ( $minutes * 60 );
 			$remSecs = sprintf "%.02d", $remSecs;
-			$tags{Minutes} = $minutes . ':' . $remSecs;
-			$tags{Length} = int( $duration );
+			$tags{minutes} = $minutes . ':' . $remSecs;
+			$tags{length} = int( $duration );
 		}
 
-		if ( ( ! $tags{Title} ) && ( ! $tags{Artist} ) ) {
+		if ( ( ! $tags{title} ) && ( ! $tags{artist} ) ) {
 			warning( "Could not determine <title>, <artist>, or possibly other tags" );
 		}
 
@@ -746,8 +719,8 @@ foreach my $songFile ( @fileLst ) {
 	}
 
 	#set 'discnumber' to default value, if not present
-	if ( ! $tags{Discnumber} ) {
-		$tags{Discnumber} = 1;
+	if ( ! $tags{discnumber} ) {
+		$tags{discnumber} = 1;
 	}
 
 	#prepare file for ffmpeg to write metadata (can't write out to self) - copy original to temp file
@@ -855,58 +828,70 @@ foreach my $songFile ( @fileLst ) {
 	toLog( " - Writing out XML to list\n" );
 	#build and output new playlist song node
 	$writer->startTag( "song", number => $num );
+	#write <track>
+	#strip leading '0' in 'Discnumber' tag
+	if ( $tags{discnumber} =~ m#^0(.+)$# ) {
+		$tags{discnumber} = $1;
+	}
+	$writer->startTag( "track", discnumber => $tags{discnumber} );
+	#padding with '0' in 'track' tag
+	if ( $tags{track} =~ m#^\d$# ) {
+		$tags{track} = '0' . $tags{track};
+	}
+	$writer->characters( $tags{track} ) if ( $tags{track} );
+	$writer->endTag( "track" );
 	#write <title>
 	$writer->startTag( "title" );
 	#replace extraneous characters
-	$tags{Title} = charReplace( $tags{Title} );
-	$writer->characters( $tags{Title} ) if ( $tags{Title} );
+	$tags{title} = charReplace( $tags{title} );
+	$writer->characters( $tags{title} ) if ( $tags{title} );
 	$writer->endTag( "title" );
-	#write <track>
-	#strip leading '0' in 'Discnumber' tag
-	if ( $tags{Discnumber} =~ m#^0(.+)$# ) {
-		$tags{Discnumber} = $1;
-	}
-	$writer->startTag( "track", discnumber => $tags{Discnumber} );
-	#padding with '0' in 'track' tag
-	if ( $tags{Track} =~ m#^\d$# ) {
-		$tags{Track} = '0' . $tags{Track};
-	}
-	$writer->characters( $tags{Track} ) if ( $tags{Track} );
-	$writer->endTag( "track" );
 	#write <artist>
 	$writer->startTag( "artist" );
 	#replace extraneous characters
-	$tags{Artist} = charReplace( $tags{Artist} );
-	$writer->characters( $tags{Artist} ) if ( $tags{Artist} );
+	$tags{artist} = charReplace( $tags{artist} );
+	$writer->characters( $tags{artist} ) if ( $tags{artist} );
 	$writer->endTag( "artist" );
 	#write <albumartist>
 	$writer->startTag( "albumartist" );
 	#replace extraneous characters
-	$tags{AlbumArtist} = charReplace( $tags{AlbumArtist} );
-	$writer->characters( $tags{AlbumArtist} ) if ( $tags{AlbumArtist} );
+	$tags{albumartist} = charReplace( $tags{albumartist} );
+	$writer->characters( $tags{albumartist} ) if ( $tags{albumartist} );
 	$writer->endTag( "albumartist" );
 	#write <album>
 	$writer->startTag( "album" );
 	#replace extraneous characters
-	$tags{Album} = charReplace( $tags{Album} );
-	$writer->characters( $tags{Album} ) if ( $tags{Album} );
+	$tags{album} = charReplace( $tags{album} );
+	$writer->characters( $tags{album} ) if ( $tags{album} );
 	$writer->endTag( "album" );
-	#write <comment>
-	$writer->startTag( "comment" );
-	#replace extraneous characters
-	$tags{Comment} = charReplace( $tags{Comment} );
-	$writer->characters( $tags{Comment} ) if ( $tags{Comment} );
-	$writer->endTag( "comment" );
 	#write <year>
-	$writer->startTag( "date" );
-	$writer->characters( $tags{Year} ) if ( $tags{Date} );
-	$writer->endTag( "date" );
+	$writer->startTag( "year" );
+	$writer->characters( $tags{year} ) if ( $tags{date} );
+	$writer->endTag( "year" );
 	#write <genre>
 	$writer->startTag( "genre" );
 	#replace extraneous characters
-	$tags{Genre} = charReplace( $tags{Genre} );
-	$writer->characters( $tags{Genre} ) if ( $tags{Genre} );
+	$tags{genre} = charReplace( $tags{genre} );
+	$writer->characters( $tags{genre} ) if ( $tags{genre} );
 	$writer->endTag( "genre" );
+	#write <bitrate>
+	$writer->startTag( "bitrate", unit => 'kbps' );
+	$writer->characters( $tags{bitrate} ) if ( $tags{bitrate} );
+	$writer->endTag( "bitrate" );
+	#write <length>
+	if ( $tags{minutes} ) {
+		$writer->startTag( "length", minutes => $tags{minutes} );
+	} else {
+		$writer->startTag( "length", minutes => '' );
+	}
+	$writer->characters( $tags{length} ) if ( $tags{length} );
+	$writer->endTag( "length" );
+	#write <comment>
+	$writer->startTag( "comment" );
+	#replace extraneous characters
+	$tags{comment} = charReplace( $tags{comment} );
+	$writer->characters( $tags{comment} ) if ( $tags{comment} );
+	$writer->endTag( "comment" );
 	#replace extraneous characters for adding <path> content
 	my $songFileClean = charReplace( $songFile );
 	#clean up path
@@ -920,23 +905,11 @@ foreach my $songFile ( @fileLst ) {
 	$writer->startTag( "path" );
 	$writer->characters( $songFileClean );
 	$writer->endTag( "path" );
-	#write <bitrate>
-	$writer->startTag( "bitrate", unit => 'kbps' );
-	$writer->characters( $tags{Bitrate} ) if ( $tags{Bitrate} );
-	$writer->endTag( "bitrate" );
-	#write <length>
-	if ( $tags{Minutes} ) {
-		$writer->startTag( "length", minutes => $tags{Minutes} );
-	} else {
-		$writer->startTag( "length", minutes => '' );
-	}
-	$writer->characters( $tags{Length} ) if ( $tags{Length} );
-	$writer->endTag( "length" );
 
 	#write out close song XML tag
 	$writer->endTag( "song" );
 
-	toLog( "Writing \"" . $tags{Title} . "\" by \"" . $tags{Artist} . "\" as number $num to playlist XML file\n" );
+	toLog( "Writing \"" . $tags{title} . "\" by \"" . $tags{artist} . "\" as number $num to playlist XML file\n" );
 }
 
 #write out close playlist XML tag
@@ -1077,7 +1050,7 @@ sub startLog {
 	my ( $log ) = @_;
 	my $time = localtime( time() );
 	my $ver_info = "  Running: '$0', Version:$Version";
-	my $Sep = "-" x 120;
+	my $Sep = "-" x 110;
 
 	openL( \$logFH, '>:encoding(UTF-8)', $log ) or badExit( "Not able to create log file\n\ttrying to create <$log>" );
 	open STDERR, '>>:encoding(UTF-8)', $log;
@@ -1097,7 +1070,7 @@ sub endLog {
 	my ( $stat ) = @_;
 	my $time = localtime( time() );
 	my $ver_info = "  Ran: '$0', Version:$Version";
-	my $Sep = "-" x 120;
+	my $Sep = "-" x 110;
 
 	if ( $stat ) {
 		$stat = 'Failed';
