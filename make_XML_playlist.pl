@@ -89,14 +89,21 @@
 #                                  of progress status
 #         1.20 -  10 Jan 2026  RAD added if statement to check $status before echoing finished to console /
 #                                  added shortmess() to pragmas
+#         1.21 -  14 Jan 2026  RAD changed escape of single quote to double quote in 'ffmpeg' data / moved 
+#                                  delete tag statements inside if loops to outside of loop (was only 
+#                                  deleting tag if correct tag didn't exist)
+#          2.0 -  18 Jan 2026  RAD changed use of 'disc' attribute/tag to 'discnumber' / changed use of 
+#                                  <date> to <year> / changed use of <duration> to <length> / removed 
+#                                  check for 'phone_music' folder to set paths to phone folders / renamed 
+#                                  lowerCase() to lowerHashCase()
 #
 #
 #   TO-DO:
-#         1) need to figure out how to get 'date' & write data from/to .mkv songs
+#         1) need to figure out how to write 'year' & 'albumartist' data to .mkv songs
 #
 #**********************************************************************************************************
 
-my $Version = "1.19";
+my $Version = "2.0";
 
 use strict;
 use warnings;
@@ -167,7 +174,7 @@ my @listOfID3Tags = (
 	'Artist',
 	'Album',
 	'AlbumArtist',
-	'Duration'
+	'Length'
 );
 
 #start process to create batch file for calling 'chcp 65001' for files/folders with Unicode characters
@@ -221,7 +228,6 @@ foreach my $songFile ( @fileLst ) {
 		'DiscNumber',
 		'Discnumber',
 		'Disc',
-		'Duration',
 		'Ensemble',
 		'Genre',
 		'Length',
@@ -461,20 +467,13 @@ foreach my $songFile ( @fileLst ) {
 				} elsif ( $key =~ m#^trackid$#i ) {
 					$tags{Track} = $tags{$key};
 				}
-				delete $tags{$key};
 			}
+			delete $tags{$key};
 		}
-		#'disc' value keyed as 'partofset', but keep 'part of set' - is listed as standard tag for ID3v2.3
+		#'discnumber' value keyed as 'partofset', but keep 'part of set' - is listed as standard tag for ID3v2.3
 		if ( $key =~ m#^PartOfSet$# ) {
-			if ( ! $tags{Disc} ) {
-				$tags{Disc} = $tags{$key};
-			}
-		}
-		#set 'discnumber' to better 'disc' value
-		if ( $key =~ m#^discnumber$#i ) {
-			if ( ! $tags{Disc} ) {
-				$tags{Disc} = $tags{$key};
-				delete $tags{$key};
+			if ( ! $tags{Discnumber} ) {
+				$tags{Discnumber} = $tags{$key};
 			}
 		}
 		#remove duplicates, etc. from 'year' value
@@ -502,9 +501,6 @@ foreach my $songFile ( @fileLst ) {
 				#add 'year' key for 'date' value
 				$tags{Year} = $tags{$key};
 			}
-			if ( $tags{$key} =~ m#^$# ) {
-				delete $tags{$key};
-			}
 		}
 		#'year' value keyed as 'original release year', but keep 'original release year' - is listed as standard tag for ID3v2.3
 		if ( $key =~ m#^originalreleaseyear$#i ) {
@@ -516,6 +512,7 @@ foreach my $songFile ( @fileLst ) {
 			if ( ! $tags{Year} ) {
 				$tags{Year} = $tags{$key};
 			}
+			delete $tags{$key};
 		}
 		#'year' value keyed as 'original date'
 		if ( $key =~ m#^originaldate$#i ) {
@@ -564,8 +561,8 @@ foreach my $songFile ( @fileLst ) {
 					$tags{$key} =~ s#^(\d+).*$#$1#;
 				}
 				$tags{Bitrate} = $tags{$key};
-				delete $tags{$key};
 			}
+			delete $tags{$key};
 		}
 		#'bitrate' value keyed as 'AudioBitrate'
 		if ( $key =~ m#^audiobitrate$#i ) {
@@ -579,13 +576,13 @@ foreach my $songFile ( @fileLst ) {
 					$tags{$key} =~ s#^(\d+).*$#$1#;
 			}
 				$tags{Bitrate} = $tags{$key};
-				delete $tags{$key};
 			}
+			delete $tags{$key};
 		}
 		#if 'comment' has previously used diagnostic text, remove it
 		if ( $key =~ m#^comment$#i ) {
 			if ( ( $tags{$key} =~ m#created from filename#i ) || ( $tags{$key} =~ m#updated with default#i ) || ( $tags{$key} =~ m#^vendor$#i ) || ( $tags{$key} =~ m#^\s+$#i ) ) {
-				delete $tags{$key};
+				$tags{$key} = '';
 			}
 		}
 		#if 'comment' value stored in 'comment-xxx'
@@ -598,19 +595,19 @@ foreach my $songFile ( @fileLst ) {
 		#if 'genre' has previously used diagnostic text, remove it
 		if ( $key =~ m#^genre$#i ) {
 			if ( ( $tags{$key} =~ m#^music$#i ) || ( $tags{$key} =~ m#^none$#i ) || ( $tags{$key} =~ m#^other$#i ) ) {
-				delete $tags{$key};
+				$tags{$key} = '';
 			}
 		}
-		#calc 'duration' for MM:SS value of 'minutes'
-		if ( $key =~ m#^duration$#i ) {
-			#if 'duration' set to approximate value, clean up
+		#calc 'length' for MM:SS value of 'minutes'
+		if ( $key =~ m#^length$#i ) {
+			#if 'length' set to approximate value, clean up
 			if ( $tags{$key} =~ m#\(approx\)#i ) {
 					$tags{$key} =~ s#^(.+)\s*\(approx\)\s*$#$1#i;
 			}
-			#duration value can be given in HH:MM:SS format
+			#length value can be given in HH:MM:SS format
 			my ( $minutes, $seconds );
 			if ( $tags{$key} =~ m#^(\d+:\d+:\d+\.?\d*)# ) {
-				$seconds = convertDuration( $1 );
+				$seconds = convertLength( $1 );
 				$tags{$key} = int( $seconds );
 			} else {
 				$seconds = $tags{$key};
@@ -626,16 +623,16 @@ foreach my $songFile ( @fileLst ) {
 			}
 			$tags{Minutes} = $minutes . ':' . $remSecs;
 		}
-		#'duration' value keyed as 'length'
-		if ( $key =~ m#^length$#i ) {
-			if ( ! $tags{Duration} ) {
+		#'length' value keyed as 'duration'
+		if ( $key =~ m#^duration$#i ) {
+			if ( ! $tags{Length} ) {
 				if ( $tags{$key} =~ m#^0\.# ) {
 					delete $tags{$key};
 				} else {
 					#'duration' value can be given in HH:MM:SS format
 					my ( $minutes, $seconds );
 					if ( $tags{$key} =~ m#^(\d+:\d+:\d+\.?\d*)# ) {
-						$seconds = convertDuration( $1 );
+						$seconds = convertLength( $1 );
 					} else {
 						$seconds = $tags{$key};
 					}
@@ -649,15 +646,16 @@ foreach my $songFile ( @fileLst ) {
 						delete $tags{Minutes};
 					}
 					$tags{Minutes} = $minutes . ':' . $remSecs;
-					#reset 'duration' value in total seconds
-					$tags{Duration} = int( $seconds );
+					#reset 'length' value in total seconds
+					$tags{Length} = int( $seconds );
 				}
 			}
+			delete $tags{$key};
 		}
 	}
 
 	#check if crucial tags have been set, try to determine from filename & path
-	if ( ( ! $tags{Title} ) || ( ! $tags{Artist} ) || ( ! $tags{Track} ) || ( ! $tags{Album} ) || ( ! $tags{Duration} ) ) {
+	if ( ( ! $tags{Title} ) || ( ! $tags{Artist} ) || ( ! $tags{Track} ) || ( ! $tags{Album} ) || ( ! $tags{Length} ) ) {
 		toLog( " - <title> or <artist> (or others) have not been set, attempting to set from filename & path\n" );
 		my ( $fileName, $filePath ) = fileparse( abspathL( $songFile ) );
 		if ( $filePath =~ m#^$musicDirPath$musicDir\\([^\\]+)\\([^\\]+)\\#i ) {
@@ -690,17 +688,19 @@ foreach my $songFile ( @fileLst ) {
 			#correct previous error in diagnostic testing for 'AC/DC'
 			$tags{AlbumArtist} =~ s#^AC[_ ]DC$#AC\/DC#i;
 		}
+
 		if ( $fileName =~ m#((\d)\-)?(\d+)\s*\-?\s+([^\\]+)\.(aac|alac|flac|m4a|mka|mkv|mp3|ogg|wma)$#i ) {
 			$tags{Title} = $4 if ( ! $tags{Title} );
 			if ( ! $tags{Track} ) {
 				$tags{Track} = $3;
 			}
-			if ( ( $2 ) && ( ! $tags{Disc} ) ) {
-				$tags{Disc} = $2;
+			if ( ( $2 ) && ( ! $tags{Discnumber} ) ) {
+				$tags{Discnumber} = $2;
 			}
 		}
+
 		#set ffprobe command for finding duration on song files that are not readable by 'ffmpeg', or have not tag data
-		toLog( " - Preparing command for 'ffprobe' to determine 'Duration'\n" );
+		toLog( " - Preparing command for 'ffprobe' to determine 'Length'\n" );
 		my @ffprobeCmd = (
 			'"' . 'C:\\Users\\rich\\Documents\\Dev\\ffmpeg\\FFmpeg-exe\\bin\\ffprobe.exe' . '"',
 			'-v error',
@@ -708,6 +708,7 @@ foreach my $songFile ( @fileLst ) {
 			'-of default=noprint_wrappers=1:nokey=1',
 			'"' . $songFile . '"'
 		);
+
 		#call 'ffprobe' to extract duration of song file
 		my $duration;
 		#start process to create batch file with 'ffprobe' command
@@ -721,6 +722,7 @@ foreach my $songFile ( @fileLst ) {
 			#write empty line to batch file in case of file header conflict
 			print $ffprobeFH "\n" . 'chcp 65001' . "\n" . 'call ' . join( " ", @ffprobeCmd );
 		close( $ffprobeFH );
+
 		toLog( " - Executing 'ffprobe' batch file\n" );
 		run3( $ffprobeBat, \undef, \$duration );
 		if ( $duration =~ m#\n(\d+)# ) {
@@ -730,21 +732,22 @@ foreach my $songFile ( @fileLst ) {
 			my $remSecs = $duration - ( $minutes * 60 );
 			$remSecs = sprintf "%.02d", $remSecs;
 			$tags{Minutes} = $minutes . ':' . $remSecs;
-			$tags{Duration} = int( $duration );
-		} else {
-			delete $tags{Duration};
+			$tags{Length} = int( $duration );
 		}
+
 		if ( ( ! $tags{Title} ) && ( ! $tags{Artist} ) ) {
 			warning( "Could not determine <title>, <artist>, or possibly other tags" );
 		}
+
 		toLog( " - Cleaning up temporary 'ffprobe' files\n" );
 		if ( testL( 'e', $ffprobeBat ) ) {
 			unlinkL( $ffprobeBat ) or badExit( "Not able to remove temporary 'ffprobe' batch file: '" . $ffprobeBat . "': $^E, $!" );
 		}
 	}
-	#set 'disc number' to default value, if not present
-	if ( ! $tags{Disc} ) {
-		$tags{Disc} = 1;
+
+	#set 'discnumber' to default value, if not present
+	if ( ! $tags{Discnumber} ) {
+		$tags{Discnumber} = 1;
 	}
 
 	#prepare file for ffmpeg to write metadata (can't write out to self) - copy original to temp file
@@ -761,11 +764,11 @@ foreach my $songFile ( @fileLst ) {
 	toLog( " - Creating 'ffmpeg' arguments for submission of metadata to song file\n" );
 	my @newMeta;
 	foreach my $key ( keys %tags ) {
-		#fix any keys that have double quotes
+		#fix any keys that have double quotes - to escaped single quote
 		$key =~ s#"#\\'#g;
-		#fix any values that have double quotes
-		$tags{$key} =~ s#"#\\'#g;
-		#replace any values that contain newlines
+		#escape double quotes in values
+		$tags{$key} =~ s#"#\\"#g;
+		#replace any values that contain newline characters
 		$tags{$key} =~ s#\r?\n#,#g;
 		#replace any values above unicode
 		if ( $tags{$key} =~ m#[^\x00-\x7F]# ) {
@@ -859,11 +862,11 @@ foreach my $songFile ( @fileLst ) {
 	$writer->characters( $tags{Title} ) if ( $tags{Title} );
 	$writer->endTag( "title" );
 	#write <track>
-	#strip leading '0' in 'disc' tag
-	if ( $tags{Disc} =~ m#^0(.+)$# ) {
-		$tags{Disc} = $1;
+	#strip leading '0' in 'Discnumber' tag
+	if ( $tags{Discnumber} =~ m#^0(.+)$# ) {
+		$tags{Discnumber} = $1;
 	}
-	$writer->startTag( "track", disc => $tags{Disc} );
+	$writer->startTag( "track", discnumber => $tags{Discnumber} );
 	#padding with '0' in 'track' tag
 	if ( $tags{Track} =~ m#^\d$# ) {
 		$tags{Track} = '0' . $tags{Track};
@@ -906,13 +909,8 @@ foreach my $songFile ( @fileLst ) {
 	$writer->endTag( "genre" );
 	#replace extraneous characters for adding <path> content
 	my $songFileClean = charReplace( $songFile );
-	#replace existing server path with phone music path, when run from phone export folder
-	if ( $workDir[0] =~ m#phone_music#i ) {
-		toLog( " - Phone 'export' directory, resetting path to phone path\n" );
-		$songFileClean =~ s#^$musicDirPath$musicDir\\#/storage/emulated/0/Music/#i;
-		#replace remaining backslashes with forward slashes for Android
-		$songFileClean =~ s#\\#\/#g;
-	} elsif ( $songFileClean =~ s#^M\:[\\/]Music[\\/]#\\\\DavisServer_1\\Music\\#i ) {
+	#clean up path
+	if ( $songFileClean =~ s#^[A-Z]\:[\\\/]Music[\\\/]#\\\\DavisServer_1\\Music\\#i ) {
 		#replace 'M:\' drive letter path with UNC path
 		toLog( " - Replacing drive letter with UNC path\n" );
 		#replace any remaining forward slashes with backslashes
@@ -926,14 +924,14 @@ foreach my $songFile ( @fileLst ) {
 	$writer->startTag( "bitrate", unit => 'kbps' );
 	$writer->characters( $tags{Bitrate} ) if ( $tags{Bitrate} );
 	$writer->endTag( "bitrate" );
-	#write <duration>
+	#write <length>
 	if ( $tags{Minutes} ) {
-		$writer->startTag( "duration", minutes => $tags{Minutes} );
+		$writer->startTag( "length", minutes => $tags{Minutes} );
 	} else {
-		$writer->startTag( "duration", minutes => '' );
+		$writer->startTag( "length", minutes => '' );
 	}
-	$writer->characters( $tags{Duration} ) if ( $tags{Duration} );
-	$writer->endTag( "duration" );
+	$writer->characters( $tags{Length} ) if ( $tags{Length} );
+	$writer->endTag( "length" );
 
 	#write out close song XML tag
 	$writer->endTag( "song" );
@@ -966,12 +964,12 @@ if ( ! $status ) {
 exit;
 
 #set array of tags to lowercase keys for easier processing of XML output
-sub lowerCase {
+sub lowerHashCase {
 	my $hashRef = shift;
 	foreach my $key ( keys %{$hashRef} ) {
 		if ( ref( $hashRef->{$key} ) eq 'HASH' ) {
 			my $innerHashRef = \%{$hashRef->{$key}};
-			$innerHashRef = lowerCase( $innerHashRef );
+			$innerHashRef = lowerHashCase( $innerHashRef );
 			%{$hashRef->{$key}} = %{$innerHashRef};
 		}
 		#lowercase $key
@@ -986,8 +984,8 @@ sub lowerCase {
 	return $hashRef;
 }
 
-#convert HH:MM:SS duration into seconds
-sub convertDuration {
+#convert HH:MM:SS length into seconds
+sub convertLength {
     my @time_parts = reverse(split(":", $_[0]));
     my $accum = 0;
     for (my $i = 0; $i < @time_parts; $i++) {
