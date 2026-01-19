@@ -19,6 +19,8 @@
 #         1.2  -  19 Jan 2026 RAD added warning count for output at end of process / changed badExit() to 
 #                                 warning() for non-essential task failures / output warning status to 
 #                                 console & log
+#         1.3  -  19 Jan 2026 RAD added missing end '}' at line #610 / corrected if loop for checking when 
+#                                 $key is 'title' - was using $tagsRef->{title}
 #
 #
 #   TO-DO:
@@ -26,7 +28,7 @@
 #
 #**********************************************************************************************************
 
-my $Version = "1.2";
+my $Version = "1.3";
 
 use strict;
 use warnings;
@@ -474,7 +476,7 @@ sub cleanTags {
 				$tagsRef->{'album artist'} = $tagsRef->{albumartist} unless ( $tagsRef->{'album artist'} );
 				$tagsRef->{artists} = $tagsRef->{$key} unless ( $tagsRef->{artists} );
 			}
-		} elsif ( $tagsRef->{title} ) {
+		} elsif ( $key =~ m#^title$# ) {
 			#set 'titlesortorder' if not specified
 			if ( ! $tagsRef->{titlesortorder} ) {
 				$tagsRef->{titlesortorder} = $tagsRef->{$key};
@@ -605,6 +607,7 @@ sub extractTags {
 			$tagsRef->{albumartist} = $tagsRef->{artist};
 			#remove extra artist info
 			$tagsRef->{albumartist} =~ s#^([^;]+)(?<!&amp);.*$#$1#;
+		}
 	} elsif ( $filePath =~ m#\\Music\\([^\\]+)\\#i ) {
 		#song file is inside 'Album\\song file' format
 		$tagsRef->{artist} = $1 if ( ! $tagsRef->{artist} );
