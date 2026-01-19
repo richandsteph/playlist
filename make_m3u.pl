@@ -21,6 +21,8 @@
 #                                 scouring /added output of statuses to console / added output of "." 
 #                                 to command shell to show progress when crawling directories
 #         1.8 -   6 Jan 2026  RAD added output of $title, $seconds, $artist when fails to populate
+#         1.9 -  19 Jan 2026  RAD removed sorting function for .m3u items (not very reliable, w/o 
+#                                 multiple sorts)
 #
 #
 #   TO-DO:
@@ -28,7 +30,7 @@
 #
 #********************************************************************************************************
 
-my $Version = "1.8";
+my $Version = "1.9";
 
 use strict;
 use warnings;
@@ -90,7 +92,7 @@ foreach my $xmlFile ( @fileLst ) {
 	$m3uData .= '#EXTINF:DATE - ' . $date . "\n";
 
 	#create hashes of sorted data for output / title, artist, & song number for logging
-	my %m3uSort;
+	my %m3uItem;
 	my %m3uTitle;
 	my %m3uArtist;
 	my %m3uNum;
@@ -106,16 +108,14 @@ foreach my $xmlFile ( @fileLst ) {
 		#exit if no .m3u data found
 		badExit( "No .m3u entry made, current entry path: '" . $path . "', title: '" . $title . "', artist: '" . $artist . "', seconds: '" . $seconds . "'" ) unless ( $seconds && $title && $artist && $path );
 		#add to m3u hash keyed by path
-		$m3uSort{$path} = '#EXTINF:' . $seconds . ',' . $title . ' - ' . $artist . "\n" . $path . "\n";
+		$m3uItem{$path} = '#EXTINF:' . $seconds . ',' . $title . ' - ' . $artist . "\n" . $path . "\n";
 		$m3uTitle{$path} = $title;
 		$m3uArtist{$path} = $artist;
 	}
 
-	#sort m3u hash
-	foreach my $key ( sort { lc( $a ) cmp lc( $b ) } keys %m3uSort ) {
-		$m3uData .= $m3uSort{$key};
-		toLog( "Writing \"$m3uTitle{$key}\" by \"$m3uArtist{$key}\" from number $m3uNum{$key} to .m3u file\n" );
-	}
+	#add song to compiled data
+	$m3uData .= $m3uItem{$key};
+	toLog( "Writing \"$m3uTitle{$key}\" by \"$m3uArtist{$key}\" from number $m3uNum{$key} to .m3u file\n" );
 
 	#write out new .m3u playlist file
 	my $m3uFH;
