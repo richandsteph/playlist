@@ -12,7 +12,10 @@
 #	  	rich@richandsteph.com
 #
 #**********************************************************************************************************
-# version 1.0  -  18 Jan 2026	RAD	initial creation
+# version 1.0  -  19 Jan 2026	RAD	initial creation
+#         1.1  -  19 Jan 2026	RAD	removed creation of 'ensemble' from extractTags() / added some filtering 
+#                                 of 'artist' & 'albumartist' in extractTags() / added 'titlesortorder' to 
+#                                 cleanTags() / edited other tags in extractTags()
 #
 #
 #   TO-DO:
@@ -20,7 +23,7 @@
 #
 #**********************************************************************************************************
 
-my $Version = "1.0";
+my $Version = "1.1";
 
 use strict;
 use warnings;
@@ -468,7 +471,16 @@ sub cleanTags {
 				$tagsRef->{'album artist'} = $tagsRef->{albumartist} unless ( $tagsRef->{'album artist'} );
 				$tagsRef->{artists} = $tagsRef->{$key} unless ( $tagsRef->{artists} );
 			}
+		} elsif ( $tagsRef->{title} ) {
+			#set 'titlesortorder' if not specified
+			if ( ! $tagsRef->{titlesortorder} ) {
+				$tagsRef->{titlesortorder} = $tagsRef->{$key};
+				#strip starting articles
+				$tagsRef->{titlesortorder} =~ s#^(the|a|an)\s+(.+)#$2#i;
+			}
 		} elsif ( $key =~ m#^albumartist$# ) {
+			#correct previous error in diagnostic testing for 'AC/DC'
+			$tagsRef->{$key} =~ s#^AC[_ ]DC$#AC\/DC#i;
 			#remove extra artist info
 			$tagsRef->{$key} =~ s#^([^;]+)(?<!&amp);.*$#$1#;
 			#set 'albumartistsortorder' if not specified
@@ -586,18 +598,21 @@ sub extractTags {
 		}
 		#correct previous error in diagnostic testing for 'AC/DC'
 		$tagsRef->{artist} =~ s#^AC[_ ]DC$#AC\/DC#i;
-		$tagsRef->{albumartist} = $tagsRef->{artist} if ( ! $tagsRef->{albumartist} );
-		$tagsRef->{ensemble} = $tagsRef->{artist} if ( ! $tagsRef->{ensemble} );
+		if ( ! $tagsRef->{albumartist} ) {
+			$tagsRef->{albumartist} = $tagsRef->{artist};
+			#remove extra artist info
+			$tagsRef->{albumartist} =~ s#^([^;]+)(?<!&amp);.*$#$1#;
 	} elsif ( $filePath =~ m#\\Music\\([^\\]+)\\#i ) {
-		#song file is inside 'Album'\\song file format
+		#song file is inside 'Album\\song file' format
 		$tagsRef->{artist} = $1 if ( ! $tagsRef->{artist} );
 		$tagsRef->{album} = $1 if ( ! $tagsRef->{album} );
 		$tagsRef->{albumartist} = $1 if ( ! $tagsRef->{albumartist} );
 		#correct previous error in diagnostic testing for 'AC/DC'
 		$tagsRef->{artist} =~ s#^AC[_ ]DC$#AC\/DC#i;
+		#remove extra artist info
+		$tagsRef->{albumartist} =~ s#^([^;]+)(?<!&amp);.*$#$1#;
 		#correct previous error in diagnostic testing for 'AC/DC'
 		$tagsRef->{albumartist} =~ s#^AC[_ ]DC$#AC\/DC#i;
-		$tagsRef->{ensemble} = $tagsRef->{artist} if ( ! $tagsRef->{ensemble} );
 	}
 
 	if ( $fileName =~ m#((\d)\-)?(\d+)\s*\-?\s+([^\\]+)\.(aac|alac|flac|m4a|mka|mkv|mp3|ogg|wma)$#i ) {
@@ -871,7 +886,7 @@ sub endLog {
 	my ( $stat ) = @_;
 	my $time = localtime( time() );
 	my $ver_info = "  Ran: '$0', Version:$Version";
-	my $Sep = "-" x 120;
+	my $Sep = "-" x 110;
 
 	if ( $stat == 0 ) {
 		$stat = 'Completed';
