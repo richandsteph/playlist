@@ -16,6 +16,9 @@
 #         1.1  -  19 Jan 2026	RAD	removed creation of 'ensemble' from extractTags() / added some filtering 
 #                                 of 'artist' & 'albumartist' in extractTags() / added 'titlesortorder' to 
 #                                 cleanTags() / edited other tags in extractTags()
+#         1.2  -  19 Jan 2026 RAD added warning count for output at end of process / changed badExit() to 
+#                                 warning() for non-essential task failures / output warning status to 
+#                                 console & log
 #
 #
 #   TO-DO:
@@ -23,7 +26,7 @@
 #
 #**********************************************************************************************************
 
-my $Version = "1.1";
+my $Version = "1.2";
 
 use strict;
 use warnings;
