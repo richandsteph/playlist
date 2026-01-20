@@ -25,6 +25,7 @@
 #                                 multiple sorts)
 #        1.10 -  20 Jan 2026  RAD corrected add to $m3uData of each song file / removed previous 
 #                                 commented out lines
+#         2.0 -  20 Jan 2026  RAD changed XML node of seconds total, from 'duration' to 'length'
 #
 #
 #   TO-DO:
@@ -32,7 +33,7 @@
 #
 #********************************************************************************************************
 
-my $Version = "1.10";
+my $Version = "2.0";
 
 use strict;
 use warnings;
@@ -100,16 +101,16 @@ foreach my $xmlFile ( @fileLst ) {
 	#parse out data for .m3u entry
 	foreach my $songNode ( $dom->findnodes( '//song' ) ) {
 		my ( $seconds, $title, $artist, $path );
-		$seconds = ( $songNode->findvalue( 'duration' ) );
+		$seconds = ( $songNode->findvalue( 'length' ) );
 		$title = ( $songNode->findvalue( 'title' ) );
 		$artist = ( $songNode->findvalue( 'artist' ) );
 		$path = ( $songNode->findvalue( 'path' ) );
 		$m3uNum{$path} = ( $songNode->findvalue( './@number' ) );
 		
 		#exit if no .m3u data found
-		badExit( "No .m3u entry made, current entry path: '" . $path . "', title: '" . $title . "', artist: '" . $artist . "', seconds: '" . $seconds . "'" ) unless ( $seconds && $title && $artist && $path );
+		badExit( "No .m3u entry made, missing (at least) 1 of path: '" . $path . "', title: '" . $title . "', artist: '" . $artist . "', length: '" . $length . "'" ) unless ( $length && $title && $artist && $path );
 		#add to m3u hash keyed by path
-		$m3uItem{$path} = '#EXTINF:' . $seconds . ',' . $title . ' - ' . $artist . "\n" . $path . "\n";
+		$m3uItem{$path} = '#EXTINF:' . $length . ',' . $title . ' - ' . $artist . "\n" . $path . "\n";
 		$m3uTitle{$path} = $title;
 		$m3uArtist{$path} = $artist;
 
