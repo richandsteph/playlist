@@ -21,14 +21,17 @@
 #                                 console & log
 #         1.3  -  19 Jan 2026 RAD added missing end '}' at line #610 / corrected if loop for checking when 
 #                                 $key is 'title' - was using $tagsRef->{title}
+#         1.4  -  20 Jan 2026 RAD changed substitution of double quote in writeTags() key & value to use 
+#                                 Unicode double quote (keybaord double quote is not allowed in command 
+#                                 line args for Windows) / reformatted some coding
 #
 #
 #   TO-DO:
-#         1) none
+#         1) determine 'bitrate' for .mkv song files
 #
 #**********************************************************************************************************
 
-my $Version = "1.3";
+my $Version = "1.4";
 
 use strict;
 use warnings;
@@ -38,6 +41,7 @@ use open ':std', IO => ':raw :encoding(UTF-8)';
 
 use Carp qw( croak longmess shortmess );
 use Data::Dumper qw( Dumper );
+use Encode qw( encode );
 use File::Basename qw( fileparse );
 #specify config file for ExifTool
 #-x-BEGIN { $Image::ExifTool::configFile = 'C:\Users\rich\.ExifTool_config' }
@@ -101,14 +105,14 @@ my @listOfTagArrays = (
 my $playlistFile;
 if ( scalar( @ARGV ) != 1 ) {
 	badExit( "Number of arguments is incorrect, single correct argument should be playlist XML filename: \n   perl C:\\git_playlist\\$progName.pl \[PLAYLIST_XML_FILENAME\]" );
-} elsif ( testL( 'e', $ARGV[0] ) ) {
+} elsif ( testL ( 'e', $ARGV[0] ) ) {
 	$playlistFile = $ARGV[0];
 } else {
 	badExit( "Playlist XML file: '" . $ARGV[0] . "' does not exist" );
 }
 
 #separate out playlist XML filename and directory
-my ( $playlistFilename, $playlistFilePath ) = fileparse( abspathL( $playlistFile ) );
+my ( $playlistFilename, $playlistFilePath ) = fileparse( abspathL ( $playlistFile ) );
 $playlistFilename =~ s#\.\w\w\w?$##;
 #echo status to console
 toLog( 'Processing playlist XML file: "' . $playlistFilename . ".xml\"...\n" );
@@ -117,7 +121,7 @@ print "\n   Processing '$playlistFilename.xml'\n";
 
 #load playlist XML
 my $xmlFH;
-openL( \$xmlFH, '<:encoding(UTF-8)', $playlistFile ) or badExit( "Not able to open playlist XML file for reading: '" . $playlistFile . "'" );
+openL ( \$xmlFH, '<:encoding(UTF-8)', $playlistFile ) or badExit( "Not able to open playlist XML file for reading: '" . $playlistFile . "'" );
 	binmode $xmlFH;
 	my $dom = XML::LibXML->load_xml( IO => $xmlFH );
 	badExit( "\n\nCouldn't load playlist XML file: $playlistFilename.xml" ) unless ( $dom );
@@ -160,9 +164,9 @@ foreach my $songNode ( $dom->findnodes( '//song' ) ) {
 		if ( $nodeName =~ m#^path$# ) {
 			#set $songFile from <path>
 			$songFile = $nodeContent if ( $nodeContent );
-			( $songFileName ) = fileparse( abspathL( $songFile ) );
-			if ( testL( 'e', $songFile ) ) {
-				toLog( "...Processing song no. " . $num . " file: '" . $songFile . "'\n" );
+			( $songFileName ) = fileparse( abspathL ( $songFile ) );
+			if ( testL ( 'e', $songFile ) ) {
+				toLog( "...Processing song no. " . $num . ": '" . $songFile . "'\n" );
 				binmode( STDOUT, ":encoding(UTF-8)" );
 				print "     - processing song no. " . $num . ": '" . $songFileName . "'\n";
 			} else {
@@ -179,9 +183,6 @@ foreach my $songNode ( $dom->findnodes( '//song' ) ) {
 		} else {
 			$tags{$nodeName} = $nodeContent if ( $nodeContent );
 		}
-	}
-	if ( ! testL( 'e', $songFile ) ) {
-		next;
 	}
 
 	#determine song file type to call best method for ID3 metadata editing
@@ -223,7 +224,7 @@ $writer->end() or badExit( "Not able to write end() XML instance to \$writer obj
 
 #write out new playlist XML
 my $xmlOutFH;
-openL( \$xmlOutFH, '>:encoding(UTF-8)', $playlistFile ) or badExit( "Not able to create '" . $playlistFile . "'" );
+openL ( \$xmlOutFH, '>:encoding(UTF-8)', $playlistFile ) or badExit( "Not able to create '" . $playlistFile . "'" );
 my $newfh = select $xmlOutFH; $| = 1; select $newfh;
 print $xmlOutFH $writer or badExit( "Not able to write out XML to '$playlistFilename.xml'" );
 close( $xmlOutFH );
@@ -297,7 +298,7 @@ sub mkvTools {
 	my $mkvBatFH;
 	#open/close batch file with commands written to it
 	toLog( "   - Creating batch file wrapper for 'mkvextract': '" . $mkvBat . "'\n" );
-	openL( \$mkvBatFH, '>:encoding(UTF-8)', $mkvBat ) or badExit( "Not able to create temporary batch file to run 'mkvextract': $^E, $!" );
+	openL ( \$mkvBatFH, '>:encoding(UTF-8)', $mkvBat ) or badExit( "Not able to create temporary batch file to run 'mkvextract': $^E, $!" );
 		my $oldFH = select $mkvBatFH; $| = 1; select $oldFH;
 		print $mkvBatFH "\n" . 'chcp 65001' . "\n" . 'call ' . join( " ", @mkvArgs );
 	close( $mkvBatFH );
@@ -310,7 +311,7 @@ sub mkvTools {
 
 	#load XML data
 	my $xmlFH;
-	openL( \$xmlFH, '<:encoding(UTF-8)', $songFileXml ) or badExit( "Not able to open XML file: '$songFileXml' for input" );
+	openL ( \$xmlFH, '<:encoding(UTF-8)', $songFileXml ) or badExit( "Not able to open XML file: '$songFileXml' for input" );
 		binmode $xmlFH;
 		my $dom = XML::LibXML->load_xml( IO => $xmlFH );
 		badExit( "\n\nCouldn't load XML file: $songFileXml" ) unless ( $dom );
@@ -326,9 +327,9 @@ sub mkvTools {
 	}
 
 	toLog( "   - Cleaning up temporary 'mkvextract' files\n" );
-	if ( testL( 'e', $songFileXml ) ) {
-		unlinkL( $mkvBat ) or warning( "Not able to remove temporary 'mkvextract' batch file: '" . $mkvBat . "': $^E, $!" );
-		unlinkL( $songFileXml ) or warning( "Not able to remove XML data for song file: '" . $songFileXml . "': $^E, $!" );
+	if ( testL ( 'e', $songFileXml ) ) {
+		unlinkL ( $mkvBat ) or warning( "Not able to remove temporary 'mkvextract' batch file: '" . $mkvBat . "': $^E, $!" );
+		unlinkL ( $songFileXml ) or warning( "Not able to remove XML data for song file: '" . $songFileXml . "': $^E, $!" );
 	} else {
 		badExit( "XML data not created for song file: '" . $songFile . "'" );
 	}
@@ -353,8 +354,6 @@ sub exifTools {
 		'-charset' . "\n" . 'exif=UTF8' . "\n",
 		#set encoding for exifTool
 		'-charset' . "\n" . 'exiftool=UTF8' . "\n",
-#-x-		#mark file for future processing as utf8
-#-x-		'-codedcharacterset=UTF8' . "\n",
 		#set encoding of ID3 metadata
 		'-charset' . "\n" . 'id3=UTF8' . "\n",
 		#allow duplicate tags
@@ -374,13 +373,13 @@ sub exifTools {
 	my ( $jsonBatFH, $jsonFH, $argsFH );
 	#open/close batch file with commands written to it
 	toLog( "   - Creating batch file wrapper for 'exiftool': '" . $jsonBat . "'\n" );
-	openL( \$jsonBatFH, '>:encoding(UTF-8)', $jsonBat ) or badExit( "Not able to create temporary batch file to run 'exiftool': $^E, $!" );
+	openL ( \$jsonBatFH, '>:encoding(UTF-8)', $jsonBat ) or badExit( "Not able to create temporary batch file to run 'exiftool': $^E, $!" );
 		my $oldFH = select $jsonBatFH; $| = 1; select $oldFH;
 		print $jsonBatFH "\n" . 'chcp 65001' . "\n" . 'call ' . join( " ", @exifToolArgs );
 	close( $jsonBatFH );
 	#open/close 'exiftool' args file with arguments written to it
 	toLog( "   - Creating argument file for 'exiftool': '" . $exifToolArgsFile . "'\n" );
-	openL( \$argsFH, '>:encoding(UTF-8)', $exifToolArgsFile ) or badExit( "Not able to create temporary arguments file to run 'exiftool': $^E, $!" );
+	openL ( \$argsFH, '>:encoding(UTF-8)', $exifToolArgsFile ) or badExit( "Not able to create temporary arguments file to run 'exiftool': $^E, $!" );
 		$oldFH = select $argsFH; $| = 1; select $oldFH;
 		print $argsFH @exifToolFileArgs;
 	close( $argsFH );
@@ -412,9 +411,9 @@ sub exifTools {
 		}
 	}
 	toLog( "   - Cleaning up temporary 'exiftool' files\n" );
-	if ( testL( 'e', $jsonBat ) || testL( 'e', $exifToolArgsFile ) ) {
-		unlinkL( $jsonBat ) or warning( "Not able to remove temporary 'exiftool' batch file: '" . $jsonBat . "': $^E, $!" );
-		unlinkL( $exifToolArgsFile ) or warning( "Not able to remove arguments file for 'exiftool': '" . $exifToolArgsFile . "': $^E, $!" );
+	if ( testL ( 'e', $jsonBat ) || testL ( 'e', $exifToolArgsFile ) ) {
+		unlinkL ( $jsonBat ) or warning( "Not able to remove temporary 'exiftool' batch file: '" . $jsonBat . "': $^E, $!" );
+		unlinkL ( $exifToolArgsFile ) or warning( "Not able to remove arguments file for 'exiftool': '" . $exifToolArgsFile . "': $^E, $!" );
 	}
 }
 
@@ -584,7 +583,7 @@ sub cleanTags {
 sub extractTags {
 	my ( $tagsRef, $songFile ) = @_;
 	toLog( "   - <title> or <artist> (or other) tags have not been set, attempting to set from filename & path\n" );
-	my ( $fileName, $filePath ) = fileparse( abspathL( $songFile ) );
+	my ( $fileName, $filePath ) = fileparse( abspathL ( $songFile ) );
 
 	#determine values from path of song file, using expected 'Music' directory
 	if ( $filePath =~ m#\\Music\\([^\\]+)\\([^\\]+)\\#i ) {
@@ -650,7 +649,7 @@ sub extractTags {
 		my $ffprobeFH;
 		#open/close batch file with commands written to it
 		toLog( "   - Creating 'ffprobe' batch file: '" . $ffprobeBat . "'\n" );
-		openL( \$ffprobeFH, '>:encoding(UTF-8)', $ffprobeBat ) or badExit( "Not able to create temporary batch file to run 'ffprobe': $^E, $!" );
+		openL ( \$ffprobeFH, '>:encoding(UTF-8)', $ffprobeBat ) or badExit( "Not able to create temporary batch file to run 'ffprobe': $^E, $!" );
 			my $oldfh = select $ffprobeFH; $| = 1; select $oldfh;
 			#write empty line to batch file in case of file header conflict
 			print $ffprobeFH "\n" . 'chcp 65001' . "\n" . 'call ' . join( " ", @ffprobeCmd );
@@ -673,8 +672,8 @@ sub extractTags {
 		}
 	
 		toLog( "   - Cleaning up temporary 'ffprobe' files\n" );
-		if ( testL( 'e', $ffprobeBat ) ) {
-			unlinkL( $ffprobeBat ) or warning( "Not able to remove temporary 'ffprobe' batch file: '" . $ffprobeBat . "': $^E, $!" );
+		if ( testL ( 'e', $ffprobeBat ) ) {
+			unlinkL ( $ffprobeBat ) or warning( "Not able to remove temporary 'ffprobe' batch file: '" . $ffprobeBat . "': $^E, $!" );
 		}
 	}
 
@@ -751,15 +750,15 @@ sub writeTags {
 
 	#prepare file for ffmpeg to write metadata (can't write out to self) - copy original to temp file
 	toLog( "   - Creating temporary song file for 'ffmpeg' to use as original song file\n" );
-	my ( $songFileName, $songFilePath ) = fileparse( abspathL( $songFile ) );
+	my ( $songFileName, $songFilePath ) = fileparse( abspathL ( $songFile ) );
 	my $tmpSongFileName = $songFileName;
 	if ( $tmpSongFileName =~ s#(.)\.(\w\w\w\w?)$#$1_tmp\.$2#i ) {
 		#verifying file is not left open by other process
 		close( $songFilePath . $tmpSongFileName );
 		close( $songFilePath . $songFileName );
 		sleep 1;
-		renameL( $songFilePath . $songFileName, $songFilePath . $tmpSongFileName );
-		if ( ! testL( 'e', $songFilePath . $tmpSongFileName ) ) {
+		renameL ( $songFilePath . $songFileName, $songFilePath . $tmpSongFileName );
+		if ( ! testL ( 'e', $songFilePath . $tmpSongFileName ) ) {
 			badExit( "Not able to rename song file: '" . $songFilePath . $songFileName . "' to temp file: '" . $songFilePath . $tmpSongFileName . "', $!, $^E\n" );
 		}
 	}
@@ -770,10 +769,14 @@ sub writeTags {
 	foreach my $key ( keys %{$tagsRef} ) {
 		#create variable for metadata key (keys with spaces can cause to fail content test)
 		my $metaKey = $key;
-		#fix any keys that have single quotes
-		$metaKey =~ s#"#\\'#g;
-		#fix any values that have double quotes
-		$tagsRef->{$key} =~ s#"#\\"#g;
+		#escape any keys that have single quote
+		$metaKey =~ s#'#\\'#g;
+		#use Unicode curved double quote in key
+		$metaKey =~ s#"#”#g;
+		#escape any values that have single quote
+		$tagsRef->{$key} =~ s#'#\\'#g;
+		#use Unicode curved double quote in value
+		$tagsRef->{$key} =~ s#"#”#g;
 		#replace any values that contain newlines
 		$tagsRef->{$key} =~ s#\r?\n#,#g;
 		if ( ! $tagsRef->{$key} ) {
@@ -828,7 +831,7 @@ sub writeTags {
 	my $ffmpegFH;
 	#open/close batch file with commands written to it
 	toLog( "   - Creating batch file with 'ffmpeg' commands: '" . $ffmpegBat . "'\n" );
-	openL( \$ffmpegFH, '>:encoding(UTF-8)', $ffmpegBat ) or badExit( "Not able to create temporary batch file to run 'ffmpeg': $^E, $!" );
+	openL ( \$ffmpegFH, '>:encoding(UTF-8)', $ffmpegBat ) or badExit( "Not able to create temporary batch file to run 'ffmpeg': $^E, $!" );
 		my $prevfh = select $ffmpegFH; $| = 1; select $prevfh;
 		#write empty line to batch file in case of file header conflict
 		print $ffmpegFH "\n" . 'chcp 65001' . "\n" . 'call ' . join( " ", @ffmpeg );
@@ -842,9 +845,9 @@ sub writeTags {
 
 	#removing temp song file & 'ffmpeg' batch file, if successful
 	toLog( "   - Removing temporary song files & batch files\n" );
-	if ( testL( 'e', $songFile ) ) {
-		unlinkL( $songFilePath . $tmpSongFileName ) or warning( "Not able to remove temporary song file: '" . $songFilePath . $tmpSongFileName . "': $^E, $!" );
-		unlinkL( $ffmpegBat ) or warning( "Not able to remove temporary 'ffmpeg' batch file: '" . $ffmpegBat . "': $^E, $!" );
+	if ( testL ( 'e', $songFile ) ) {
+		unlinkL ( $songFilePath . $tmpSongFileName ) or warning( "Not able to remove temporary song file: '" . $songFilePath . $tmpSongFileName . "': $^E, $!" );
+		unlinkL ( $ffmpegBat ) or warning( "Not able to remove temporary 'ffmpeg' batch file: '" . $ffmpegBat . "': $^E, $!" );
 	} else {
 		badExit( "Not able to remove temporary song file & batch files for song file: '" . $songFile . "'" );
 	}
@@ -874,7 +877,7 @@ sub startLog {
 	my $ver_info = "  Running: '$0', Version:$Version";
 	my $Sep = "-" x 110;
 
-	openL( \$logFH, '>:encoding(UTF-8)', $log ) or badExit( "Not able to create log file\n\ttrying to create <$log>" );
+	openL ( \$logFH, '>:encoding(UTF-8)', $log ) or badExit( "Not able to create log file\n\ttrying to create <$log>" );
 	open STDERR, '>>:encoding(UTF-8)', $log;
 		my $prevfh = select $logFH; $| = 1; select $prevfh;
 		#write empty line to batch file in case of file header conflict
