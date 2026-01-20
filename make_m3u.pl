@@ -23,6 +23,8 @@
 #         1.8 -   6 Jan 2026  RAD added output of $title, $seconds, $artist when fails to populate
 #         1.9 -  19 Jan 2026  RAD removed sorting function for .m3u items (not very reliable, w/o 
 #                                 multiple sorts)
+#        1.10 -  20 Jan 2026  RAD corrected add to $m3uData of each song file / removed previous 
+#                                 commented out lines
 #
 #
 #   TO-DO:
@@ -30,7 +32,7 @@
 #
 #********************************************************************************************************
 
-my $Version = "1.9";
+my $Version = "1.10";
 
 use strict;
 use warnings;
@@ -83,7 +85,6 @@ foreach my $xmlFile ( @fileLst ) {
 		$m3uFileName = $dom->findnodes( '/playlist/@name' );
 	} else {
 		( $m3uFileName ) = fileparse( abspathL( $xmlFile ) );
-#-x-		$m3uFileName = basename( $xmlFile );
 		$m3uFileName =~ s#\.\w\w\w?$##;
 	}
 	$m3uData .= "$m3uFileName\n";
@@ -111,18 +112,17 @@ foreach my $xmlFile ( @fileLst ) {
 		$m3uItem{$path} = '#EXTINF:' . $seconds . ',' . $title . ' - ' . $artist . "\n" . $path . "\n";
 		$m3uTitle{$path} = $title;
 		$m3uArtist{$path} = $artist;
-	}
 
-	#add song to compiled data
-	$m3uData .= $m3uItem{$key};
-	toLog( "Writing \"$m3uTitle{$key}\" by \"$m3uArtist{$key}\" from number $m3uNum{$key} to .m3u file\n" );
+		#add song to compiled data
+		$m3uData .= $m3uItem{$path};
+		toLog( "Writing \"$m3uTitle{$path}\" by \"$m3uArtist{$path}\" from number $m3uNum{$path} to .m3u file\n" );
+	}
 
 	#write out new .m3u playlist file
 	my $m3uFH;
 	my $m3uFile = $xmlFile;
 	$m3uFile = $m3uFileName . '.m3u';
 	openL ( \$m3uFH, '>:encoding(UTF-8)', $m3uFile ) or badExit( "Not able to create '$m3uFile'" );
-#-x-	open FILE, ">$m3uFile" or badExit( "Not able to create '$m3uFile'\n" );
 		my $oldfh = select $m3uFH; $| = 1; select $oldfh;
 		print $m3uFH $m3uData;
 	close $m3uFH;
