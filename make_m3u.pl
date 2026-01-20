@@ -26,6 +26,7 @@
 #        1.10 -  20 Jan 2026  RAD corrected add to $m3uData of each song file / removed previous 
 #                                 commented out lines
 #         2.0 -  20 Jan 2026  RAD changed XML node of seconds total, from 'duration' to 'length'
+#         2.1 -  20 Jan 2026  RAD corrected missing changes from 'seconds' to 'length'
 #
 #
 #   TO-DO:
@@ -33,7 +34,7 @@
 #
 #********************************************************************************************************
 
-my $Version = "2.0";
+my $Version = "2.1";
 
 use strict;
 use warnings;
@@ -100,8 +101,8 @@ foreach my $xmlFile ( @fileLst ) {
 	my %m3uNum;
 	#parse out data for .m3u entry
 	foreach my $songNode ( $dom->findnodes( '//song' ) ) {
-		my ( $seconds, $title, $artist, $path );
-		$seconds = ( $songNode->findvalue( 'length' ) );
+		my ( $length, $title, $artist, $path );
+		$length = ( $songNode->findvalue( 'length' ) );
 		$title = ( $songNode->findvalue( 'title' ) );
 		$artist = ( $songNode->findvalue( 'artist' ) );
 		$path = ( $songNode->findvalue( 'path' ) );
