@@ -4,7 +4,9 @@ Includes scripts to create playlist XML from 'Music' folder (with artist & album
   Usage:
     (for update_ID3_tags.pl) `perl update_ID3_tags.pl [PLAYLIST_XML_FILE]`
     (for remainder of scripts) `perl [SCRIPT_NAME]`
+```
 ---
+```
 
 Playlist XML example:
 <playlist name="rich-favorites" date="Tue Jan 20 21:09:59 2026">
