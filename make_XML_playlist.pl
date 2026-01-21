@@ -100,14 +100,20 @@
 #                                  set all tag names to uniform lowercase / removed 'ensemble' tag / added 
 #                                  updated -charset encoding arguments to 'exiftool' / edited clean up of 
 #                                  tags
+#          2.2 -  21 Jan 2026  RAD changed substitution of double quote from escaped quote to Unicode 
+#                                  double quote (Windows doesn't allow double quote in command-line) / 
+#                                  added if loop for extracting length via 'ffprobe' when neither 'length' 
+#                                  or 'duration' set / added 'part_number' for 'track' metadata in .mkv 
+#                                  song file / lowercased tag keys / removed 'ffmpeg' code to NOT update 
+#                                  metadata to song file / removed unused @listOfID3Tags
 #
 #
 #   TO-DO:
-#         1) need to figure out how to write 'year' & 'albumartist' data to .mkv songs
+#         1) none
 #
 #**********************************************************************************************************
 
-my $Version = "2.1";
+my $Version = "2.2";
 
 use strict;
 use warnings;
@@ -171,16 +177,6 @@ if ( $workDir[0] =~ m#phone_music#i ) {
 my $date = localtime( time() );
 $writer->startTag( "playlist", name => $playlist_name, date => $date );
 
-#list of ID3 verified tag names
-my @listOfID3Tags = (
-	'track',
-	'title',
-	'artist',
-	'albumartist',
-	'album',
-	'length'
-);
-
 #start process to create batch file for calling 'chcp 65001' for files/folders with Unicode characters
 my $statBat = $ENV{TEMP} . $FS . 'stat' . '.bat';
 my $statBatFH;
@@ -235,6 +231,7 @@ foreach my $songFile ( @fileLst ) {
 		'minutes',
 		'originaldate',
 		'originalreleaseyear',
+		'part_number',
 		'partofset',
 		'path',
 		'title',
@@ -297,14 +294,18 @@ foreach my $songFile ( @fileLst ) {
 			my $tagValue = $xmlNode->findvalue( './String' );
 			if ( grep /$tagName/i, @listOfAllTags ) {
 				#tag names should be initial-capped
-				if ( $tagName =~ m#ALBUMARTISTSORT# ) {
-					$tagName = 'AlbumArtistSort';
-				} elsif ( $tagName =~ m#ALBUMARTIST# ) {
-					$tagName = 'AlbumArtist';
+				if ( $tagName =~ m#ALBUMARTISTSORTORDER# ) {
+					$tagName = 'albumartistsortorder';
+				} elsif ( $tagName =~ m#ALBUMARTISTSORT# ) {
+					$tagName = 'albumartistsort';
+				} elsif ( $tagName =~ m#ALBUM_ARTIST# ) {
+					$tagName = 'albumartist';
+				} elsif ( $tagName =~ m#ARTISTSORTORDER# ) {
+					$tagName = 'artistsortorder';
 				} elsif ( $tagName =~ m#ARTISTSORT# ) {
-					$tagName = 'ArtistSort';
-				} elsif ( $tagName =~ m#^[A-Z]+$# ) {
-					$tagName =~ s#([\w']+)#\u\L$1#
+					$tagName = 'artistsort';
+				} elsif ( $tagName =~ m#^[A-Z]# ) {
+					$tagName =~ s#([\w']+)#\L$1\E#
 				}
 				$tags{$tagName} = $tagValue;
 			}
@@ -386,9 +387,10 @@ foreach my $songFile ( @fileLst ) {
 		#create hashref for hash of tags => values
 		my $tagsArray = $jsonData;
 		foreach my $key ( keys %{${$tagsArray}[0]} ) {
+			my $lcKey = lc( $key );
 			#check MKV tag names and substitute to actual tag name
-			if ( grep /$key/, @listOfAllTags ) {
-				$tags{$key} = ${$tagsArray}[0]{$key};
+			if ( grep /$lcKey/, @listOfAllTags ) {
+				$tags{$lcKey} = ${$tagsArray}[0]{$lcKey};
 			}
 		}
 		toLog( " - Cleaning up temporary 'exiftool' files\n" );
@@ -406,155 +408,253 @@ foreach my $songFile ( @fileLst ) {
 	foreach my $key ( keys %tags ) {
 		#set 'album artist' if not specified
 		if ( $key =~ m#^artist$#i ) {
-			#correct previous error in diagnostic testing for 'AC/DC'
-			$tags{$key} =~ s#^AC[_ ]DC$#AC\/DC#i;
-			if ( ! $tags{albumartist} ) {
-				if ( $tags{album_artist} ) {
-					$tags{albumartist} = $tags{album_artist};
-					#remove extra artist info
-					$tags{albumartist} =~ s#^([^;]+)(?<!&amp);.*$#$1#;
-					#correct previous error in diagnostic testing for 'AC/DC'
-					$tags{albumartist} =~ s#^AC[_ ]DC$#AC\/DC#i;
-					#remove for preferred 'albumartist' key
-					delete $tags{album_artist};
-				}
-			} else {
-				$tags{albumartist} = $tags{$key};
-					#remove extra artist info
-					$tags{albumartist} =~ s#^([^;]+)(?<!&amp);.*$#$1#;
+			#lowercase key
+			my $lcKey = lc( $key );
+			if ( $key =~ m#^[A-Z]# ) {
+				#resetting to lowercase value
+				$tags{$lcKey} = $tags{$key};
+				delete $tags{$key};
 			}
+			#correct previous error in diagnostic testing for 'AC/DC'
+			$tags{$lcKey} =~ s#^AC[_ ]DC$#AC\/DC#i;
+			if ( $tags{'album_artist'} ) {
+				$tags{albumartist} = $tags{'album_artist'};
+				#correct previous error in diagnostic testing for 'AC/DC'
+				$tags{albumartist} =~ s#^AC[_ ]DC$#AC\/DC#i;
+				#remove for preferred 'albumartist' key
+				delete $tags{'album_artist'};
+			} elsif ( $tags{'ALBUM_ARTIST'} ) {
+				$tags{albumartist} = $tags{'ALBUM_ARTIST'};
+				#correct previous error in diagnostic testing for 'AC/DC'
+				$tags{albumartist} =~ s#^AC[_ ]DC$#AC\/DC#i;
+				#remove for preferred 'albumartist' key
+				delete $tags{'ALBUM_ARIST'};
+			}
+			$tags{albumartist} = $tags{$lcKey} if ( ! $tags{albumartist} );
 		}
 		#remove extra artist info
 		$tags{albumartist} =~ s#^([^;]+)(?<!&amp);.*$#$1#;
+		if ( $key =~ m#^artists$#i ) {
+			#lowercase key
+			my $lcKey = lc( $key );
+			if ( $key =~ m#^[A-Z]# ) {
+				#resetting to lowercase value
+				$tags{$lcKey} = $tags{$key};
+				delete $tags{$key};
+			}
+		} elsif ( $key =~ m#^album$#i ) {
+			#lowercase key
+			my $lcKey = lc( $key );
+			if ( $key =~ m#^[A-Z]# ) {
+				#resetting to lowercase value
+				$tags{$lcKey} = $tags{$key};
+				delete $tags{$key};
+			}
+		} elsif ( $key =~ m#^discnumber$#i ) {
+			#lowercase key
+			my $lcKey = lc( $key );
+			if ( $key =~ m#^[A-Z]# ) {
+				#resetting to lowercase value
+				$tags{$lcKey} = $tags{$key};
+				delete $tags{$key};
+			}
+		}
 		#clean up 'albumartistsort'
-		if ( $tags{albumartistsortorder} ) {
+		if ( ( $key =~ m#^albumartistsortorder$#i ) || ( $key =~ m#^albumartistsort$#i ) ) {
+			#lowercase key
+			my $lcKey = lc( $key );
+			if ( $key =~ m#^[A-Z]# ) {
+				#resetting to lowercase value
+				$tags{$lcKey} = $tags{$key};
+				delete $tags{$key};
+			}
 			#remove extra artist info
-			$tags{albumartistsortorder} =~ s#^([^;]+)(?<!&amp);.*$#$1#;
+			$tags{$lcKey} =~ s#^([^;]+)(?<!&amp);.*$#$1#;
 			#correct previous error in diagnostic testing for 'AC/DC'
-			$tags{albumartistsortorder} =~ s#^AC[_ ]DC$#AC\/DC#i;
+			$tags{$lcKey} =~ s#^AC[_ ]DC$#AC\/DC#i;
 			#strip starting articles
-			$tags{albumartistsortorder} =~ s#^(the|a|an)\s+(.+)#$2#i;
+			$tags{$lcKey} =~ s#^(the|a|an)\s+(.+)#$2#i;
 		}
 		#clean up 'artistsort'
-		if ( $tags{artistsortorder} ) {
+		if ( ( $key =~ m#^artistsortorder$#i ) || ( $key =~ m#^artistsort$#i ) ) {
+			#lowercase key
+			my $lcKey = lc( $key );
+			if ( $key =~ m#^[A-Z]# ) {
+				#resetting to lowercase value
+				$tags{$lcKey} = $tags{$key};
+				delete $tags{$key};
+			}
 			#remove extra artist info
-			$tags{artistsortorder} =~ s#^([^;]+)(?<!&amp);.*$#$1#;
+			$tags{$lcKey} =~ s#^([^;]+)(?<!&amp);.*$#$1#;
 			#correct previous error in diagnostic testing for 'AC/DC'
-			$tags{artistsortorder} =~ s#^AC[_ ]DC$#AC\/DC#i;
+			$tags{$lcKey} =~ s#^AC[_ ]DC$#AC\/DC#i;
 			#strip starting articles
-			$tags{artistsortorder} =~ s#^(the|a|an)\s+(.+)#$2#i;
+			$tags{$lcKey} =~ s#^(the|a|an)\s+(.+)#$2#i;
 		}
-		#'track' value keyed as 'track id' or 'tracknumber'
-		if ( ( $key =~ m#^tracknumber$#i ) || ( $key =~ m#^trackid$#i ) ) {
+		#'track' value keyed as 'track id' or 'tracknumber' or 'part_number'
+		if ( ( $key =~ m#^tracknumber$#i ) || ( $key =~ m#^trackid$#i ) || ( $key =~ m#^part_number$#i ) ) {
 			if ( ! $tags{track} ) {
 				#prefer 'track number' over 'track id'
 				if ( $key =~ m#^tracknumber$#i ) {
 					$tags{track} = $tags{$key};
 				} elsif ( $key =~ m#^trackid$#i ) {
 					$tags{track} = $tags{$key};
+				} elsif ( $key =~ m#^part_number$#i ) {
+					$tags{track} = $tags{$key};
 				}
 			}
 			delete $tags{$key};
 		}
 		#'discnumber' value keyed as 'partofset', but keep 'part of set' - is listed as standard tag for ID3v2.3
-		if ( $key =~ m#^partofset$# ) {
+		if ( $key =~ m#^partofset$#i ) {
 			if ( ! $tags{discnumber} ) {
 				$tags{discnumber} = $tags{$key};
 			}
 		}
 		#remove duplicates, etc. from 'year' value
 		if ( $key =~ m#^year$#i ) {
-			#remove duplicate
-			$tags{$key} =~ s#^(\d\d\d\d).*$#$1#;
-			#if 'date' not equal 'year', use 'date' value
-			if ( ( $tags{date} ) && ( $tags{date} !~ m#^$tags{$key}$# ) ) {
-				$tags{$key} = $tags{date};
-			} else {
-				$tags{date} = $tags{$key};
-			}
-			if ( $tags{$key} =~ m#^$# ) {
+			#lowercase key
+			my $lcKey = lc( $key );
+			if ( $key =~ m#^[A-Z]# ) {
+				#resetting to lowercase value
+				$tags{$lcKey} = $tags{$key};
 				delete $tags{$key};
+			}
+			#remove duplicate
+			$tags{$lcKey} =~ s#^(\d\d\d\d).*$#$1#;
+			#if 'date' not equal 'year', use 'date' value
+			if ( ( $tags{date} ) && ( $tags{date} !~ m#^$tags{$lcKey}$# ) ) {
+				$tags{$lcKey} = $tags{date};
+			} else {
+				$tags{date} = $tags{$lcKey};
 			}
 		}
 		#remove duplicates, etc. from 'date' value
 		if ( $key =~ m#^date$#i ) {
+			#lowercase key
+			my $lcKey = lc( $key );
+			if ( $key =~ m#^[A-Z]# ) {
+				#resetting to lowercase value
+				$tags{$lcKey} = $tags{$key};
+				delete $tags{$key};
+			}
 			#remove duplicate
-			$tags{$key} =~ s#^(\d\d\d\d).*$#$1#;
-			if ( ( ! $tags{year} ) && ( $tags{$key} !~ m#^$# ) ) {
+			$tags{$lcKey} =~ s#^(\d\d\d\d).*$#$1#;
+			if ( ( ! $tags{year} ) && ( $tags{$lcKey} !~ m#^$# ) ) {
 				#add 'year' key for 'date' value
-				$tags{year} = $tags{$key};
+				$tags{year} = $tags{$lcKey};
 			}
 			delete $tags{date};
 		}
 		#'year' value keyed as 'original release year', but keep 'original release year' - is listed as standard tag for ID3v2.3
 		if ( $key =~ m#^originalreleaseyear$#i ) {
+			#lowercase key
+			my $lcKey = lc( $key );
+			if ( $key =~ m#^[A-Z]# ) {
+				#resetting to lowercase value
+				$tags{$lcKey} = $tags{$key};
+				delete $tags{$key};
+			}
 			#remove duplicate
-			$tags{$key} =~ s#^(\d\d\d\d).*$#$1#;
+			$tags{$lcKey} =~ s#^(\d\d\d\d).*$#$1#;
 			if ( ! $tags{year} ) {
-				$tags{year} = $tags{$key};
+				$tags{year} = $tags{$lcKey};
 			}
 		}
 		#'year' value keyed as 'original date'
 		if ( $key =~ m#^originaldate$#i ) {
+			#lowercase key
+			my $lcKey = lc( $key );
+			if ( $key =~ m#^[A-Z]# ) {
+				#resetting to lowercase value
+				$tags{$lcKey} = $tags{$key};
+				delete $tags{$key};
+			}
 			#remove duplicate
-			$tags{$key} =~ s#^(\d\d\d\d).*$#$1#;
+			$tags{$lcKey} =~ s#^(\d\d\d\d).*$#$1#;
 			if ( ! $tags{year} ) {
-				$tags{year} = $tags{$key};
+				$tags{year} = $tags{$lcKey};
 			}
 		}
 		#'year' value keyed as 'DateTimeOriginal'
 		if ( $key =~ m#^datetimeoriginal$#i ) {
+			#lowercase key
+			my $lcKey = lc( $key );
+			if ( $key =~ m#^[A-Z]# ) {
+				#resetting to lowercase value
+				$tags{$lcKey} = $tags{$key};
+				delete $tags{$key};
+			}
 			#remove duplicate
-			$tags{$key} =~ s#^(\d\d\d\d).*$#$1#;
+			$tags{$lcKey} =~ s#^(\d\d\d\d).*$#$1#;
 			if ( ! $tags{year} ) {
-				$tags{year} = $tags{$key};
+				$tags{year} = $tags{$lcKey};
 			}
 		}
 		#'bitrate' needs some format checks
 		if ( $key =~ m#^bitrate$#i ) {
+			#lowercase key
+			my $lcKey = lc( $key );
+			if ( $key =~ m#^[A-Z]# ) {
+				#resetting to lowercase value
+				$tags{$lcKey} = $tags{$key};
+				delete $tags{$key};
+			}
 			#match at least 6 digits (for 1,000's), but also capture any trailing digits but leaving the rest off)
-			if ( $tags{$key} =~ s#^(\d{6}\d*).*$#$1# ) {
-				$tags{$key} = $tags{$key} / 1000;
-				$tags{$key} = int( $tags{$key} );
+			if ( $tags{$lcKey} =~ s#^(\d{6}\d*).*$#$1# ) {
+				$tags{$lcKey} = $tags{$lcKey} / 1000;
+				$tags{$lcKey} = int( $tags{$lcKey} );
 			} else {
 				#strip any extraneous characters from digits otherwise
-				$tags{$key} =~ s#^(\d+).*$#$1#;
+				$tags{$lcKey} =~ s#^(\d+).*$#$1#;
 			}
 		}
 		#'bitrate' value keyed as 'bit_rate'
 		if ( $key =~ m#^bit_rate$#i ) {
 			if ( ! $tags{bitrate} ) {
+				#lowercase key
+				my $lcKey = lc( $key );
+				if ( $key =~ m#^[A-Z]# ) {
+					#resetting to lowercase value
+					$tags{$lcKey} = $tags{$key};
+					delete $tags{$key};
+				}
 				#match at least 6 digits (for 1,000's), but also capture any trailing digits but leaving the rest off)
-				if ( $tags{$key} =~ s#^(\d{6}\d*).*$#$1# ) {
-					$tags{$key} = $tags{$key} / 1000;
-					$tags{$key} = int( $tags{$key} );
+				if ( $tags{$lcKey} =~ s#^(\d{6}\d*).*$#$1# ) {
+					$tags{$lcKey} = $tags{$lcKey} / 1000;
+					$tags{$lcKey} = int( $tags{$lcKey} );
 				} else {
 					#strip any extraneous characters from digits otherwise
-					$tags{$key} =~ s#^(\d+).*$#$1#;
+					$tags{$lcKey} =~ s#^(\d+).*$#$1#;
 				}
-				$tags{bitrate} = $tags{$key};
+				$tags{bitrate} = $tags{$lcKey};
 			}
-			delete $tags{$key};
 		}
 		#'bitrate' value keyed as 'AudioBitrate'
 		if ( $key =~ m#^audiobitrate$#i ) {
 			if ( ! $tags{bitrate} ) {
+				#lowercase key
+				my $lcKey = lc( $key );
+				if ( $key =~ m#^[A-Z]# ) {
+					#resetting to lowercase value
+					$tags{$lcKey} = $tags{$key};
+					delete $tags{$key};
+				}
 				#match at least 6 digits (for 1,000's), but also capture any trailing digits but leaving the rest off)
-				if ( $tags{$key} =~ s#^(\d{6}\d*).*$#$1# ) {
-					$tags{$key} = $tags{$key} / 1000;
-					$tags{$key} = int( $tags{$key} );
+				if ( $tags{$lcKey} =~ s#^(\d{6}\d*).*$#$1# ) {
+					$tags{$lcKey} = $tags{$lcKey} / 1000;
+					$tags{$lcKey} = int( $tags{$lcKey} );
 				} else {
 					#strip any extraneous characters from digits otherwise
-					$tags{$key} =~ s#^(\d+).*$#$1#;
+					$tags{$lcKey} =~ s#^(\d+).*$#$1#;
+				}
+				$tags{bitrate} = $tags{$lcKey};
 			}
-				$tags{bitrate} = $tags{$key};
-			}
-			delete $tags{$key};
 		}
 		#if 'comment' has previously used diagnostic text, remove it
 		if ( $key =~ m#^comment$#i ) {
 			if ( ( $tags{$key} =~ m#created from filename#i ) || ( $tags{$key} =~ m#updated with default#i ) || ( $tags{$key} =~ m#^vendor$#i ) || ( $tags{$key} =~ m#^\s+$#i ) ) {
-				$tags{$key} = '';
+				delete $tags{$key};
 			}
 		}
 		#if 'comment' value stored in 'comment-xxx'
@@ -567,22 +667,32 @@ foreach my $songFile ( @fileLst ) {
 		#if 'genre' has previously used diagnostic text, remove it
 		if ( $key =~ m#^genre$#i ) {
 			if ( ( $tags{$key} =~ m#^music$#i ) || ( $tags{$key} =~ m#^none$#i ) || ( $tags{$key} =~ m#^other$#i ) ) {
-				$tags{$key} = '';
+				delete $tags{$key};
 			}
 		}
 		#calc 'length' for MM:SS value of 'minutes'
 		if ( $key =~ m#^length$#i ) {
+			#lowercase key
+			my $lcKey = lc( $key );
+			if ( $key =~ m#^[A-Z]# ) {
+				#resetting to lowercase value
+				$tags{$lcKey} = $tags{$key};
+				delete $tags{$key};
+				if ( grep /^Minutes$/, keys %tags ) {
+					delete $tags{Minutes};
+				}
+			}
 			#if 'length' set to approximate value, clean up
-			if ( $tags{$key} =~ m#\(approx\)#i ) {
-					$tags{$key} =~ s#^(.+)\s*\(approx\)\s*$#$1#i;
+			if ( $tags{$lcKey} =~ m#\(approx\)#i ) {
+					$tags{$lcKey} =~ s#^(.+)\s*\(approx\)\s*$#$1#i;
 			}
 			#length value can be given in HH:MM:SS format
 			my ( $minutes, $seconds );
-			if ( $tags{$key} =~ m#^(\d+:\d+:\d+\.?\d*)# ) {
+			if ( $tags{$lcKey} =~ m#^(\d+:\d+:\d+\.?\d*)# ) {
 				$seconds = convertLength( $1 );
-				$tags{$key} = int( $seconds );
+				$tags{$lcKey} = int( $seconds );
 			} else {
-				$seconds = $tags{$key};
+				$seconds = $tags{$lcKey};
 			}
 			#set value for 'minutes' in MM:SS
 			$minutes = $seconds / 60;
@@ -590,23 +700,33 @@ foreach my $songFile ( @fileLst ) {
 			my $remSecs = $seconds - ( $minutes * 60 );
 			$remSecs = sprintf "%.02d", $remSecs;
 			#delete existing 'minutes' - diagnostic testing caused several erroneous calcs for minutes
-			if ( exists $tags{minutes} ) {
-				delete $tags{minutes};
+			if ( grep /^(minutes)$/i, keys %tags ) {
+				delete $tags{$1};
 			}
 			$tags{minutes} = $minutes . ':' . $remSecs;
 		}
 		#'length' value keyed as 'duration'
 		if ( $key =~ m#^duration$#i ) {
 			if ( ! $tags{length} ) {
-				if ( $tags{$key} =~ m#^0\.# ) {
+				#lowercase key
+				my $lcKey = lc( $key );
+				if ( $key =~ m#^[A-Z]# ) {
+					#resetting to lowercase value
+					$tags{$lcKey} = $tags{$key};
 					delete $tags{$key};
+					if ( grep /^Minutes$/, keys %tags ) {
+						delete $tags{Minutes};
+					}
+				}
+				if ( $tags{$lcKey} =~ m#^0\.# ) {
+					delete $tags{$lcKey};
 				} else {
 					#'duration' value can be given in HH:MM:SS format
 					my ( $minutes, $seconds );
-					if ( $tags{$key} =~ m#^(\d+:\d+:\d+\.?\d*)# ) {
+					if ( $tags{$lcKey} =~ m#^(\d+:\d+:\d+\.?\d*)# ) {
 						$seconds = convertLength( $1 );
 					} else {
-						$seconds = $tags{$key};
+						$seconds = $tags{$lcKey};
 					}
 					#set value for 'minutes' in MM:SS
 					$minutes = $seconds / 60;
@@ -622,7 +742,7 @@ foreach my $songFile ( @fileLst ) {
 					$tags{length} = int( $seconds );
 				}
 			}
-			delete $tags{$key} if ( $tags{length} );
+			delete $tags{lc( $key )} if ( $tags{length} );
 		}
 	}
 
@@ -672,156 +792,57 @@ foreach my $songFile ( @fileLst ) {
 			}
 		}
 
-		#set ffprobe command for finding duration on song files that are not readable by 'ffmpeg', or have not tag data
-		toLog( " - Preparing command for 'ffprobe' to determine 'Length'\n" );
-		my @ffprobeCmd = (
-			'"' . 'C:\\Users\\rich\\Documents\\Dev\\ffmpeg\\FFmpeg-exe\\bin\\ffprobe.exe' . '"',
-			'-v error',
-			'-show_entries format=duration',
-			'-of default=noprint_wrappers=1:nokey=1',
-			'"' . $songFile . '"'
-		);
+		if ( ( ! $tags{length} ) && ( ! $tags{duration} ) ) {
+			#set ffprobe command for finding duration on song files that are not readable by 'ffmpeg', or have not tag data
+			toLog( " - Preparing command for 'ffprobe' to determine 'Length'\n" );
+			my @ffprobeCmd = (
+				'"' . 'C:\\Users\\rich\\Documents\\Dev\\ffmpeg\\FFmpeg-exe\\bin\\ffprobe.exe' . '"',
+				'-v error',
+				'-show_entries format=duration',
+				'-of default=noprint_wrappers=1:nokey=1',
+				'"' . $songFile . '"'
+			);
+	
+			#call 'ffprobe' to extract duration of song file
+			my $duration;
+			#start process to create batch file with 'ffprobe' command
+			my $ffprobeBat = $ENV{TEMP} . $FS . 'ffprobe-' . $num . '.bat';
+			#batch file handle ref
+			my $ffprobeFH;
+			#open/close batch file with commands written to it
+			toLog( " - Creating 'ffprobe' batch file: '" . $ffprobeBat . "'\n" );
+			openL( \$ffprobeFH, '>:encoding(UTF-8)', $ffprobeBat ) or badExit( "Not able to create temporary batch file to run 'ffprobe': $^E, $!" );
+				my $oldfh = select $ffprobeFH; $| = 1; select $oldfh;
+				#write empty line to batch file in case of file header conflict
+				print $ffprobeFH "\n" . 'chcp 65001' . "\n" . 'call ' . join( " ", @ffprobeCmd );
+			close( $ffprobeFH );
+	
+			toLog( " - Executing 'ffprobe' batch file\n" );
+			run3( $ffprobeBat, \undef, \$duration );
+			if ( $duration =~ m#\n(\d+)# ) {
+				$duration = $1;
+				my $minutes = $duration / 60;
+				$minutes = sprintf "%.02d", $minutes;
+				my $remSecs = $duration - ( $minutes * 60 );
+				$remSecs = sprintf "%.02d", $remSecs;
+				$tags{minutes} = $minutes . ':' . $remSecs;
+				$tags{length} = int( $duration );
+			}
 
-		#call 'ffprobe' to extract duration of song file
-		my $duration;
-		#start process to create batch file with 'ffprobe' command
-		my $ffprobeBat = $ENV{TEMP} . $FS . 'ffprobe-' . $num . '.bat';
-		#batch file handle ref
-		my $ffprobeFH;
-		#open/close batch file with commands written to it
-		toLog( " - Creating 'ffprobe' batch file: '" . $ffprobeBat . "'\n" );
-		openL( \$ffprobeFH, '>:encoding(UTF-8)', $ffprobeBat ) or badExit( "Not able to create temporary batch file to run 'ffprobe': $^E, $!" );
-			my $oldfh = select $ffprobeFH; $| = 1; select $oldfh;
-			#write empty line to batch file in case of file header conflict
-			print $ffprobeFH "\n" . 'chcp 65001' . "\n" . 'call ' . join( " ", @ffprobeCmd );
-		close( $ffprobeFH );
+			if ( ( ! $tags{title} ) && ( ! $tags{artist} ) ) {
+				warning( "Could not determine <title>, <artist>, or possibly other tags" );
+			}
 
-		toLog( " - Executing 'ffprobe' batch file\n" );
-		run3( $ffprobeBat, \undef, \$duration );
-		if ( $duration =~ m#\n(\d+)# ) {
-			$duration = $1;
-			my $minutes = $duration / 60;
-			$minutes = sprintf "%.02d", $minutes;
-			my $remSecs = $duration - ( $minutes * 60 );
-			$remSecs = sprintf "%.02d", $remSecs;
-			$tags{minutes} = $minutes . ':' . $remSecs;
-			$tags{length} = int( $duration );
-		}
-
-		if ( ( ! $tags{title} ) && ( ! $tags{artist} ) ) {
-			warning( "Could not determine <title>, <artist>, or possibly other tags" );
-		}
-
-		toLog( " - Cleaning up temporary 'ffprobe' files\n" );
-		if ( testL( 'e', $ffprobeBat ) ) {
-			unlinkL( $ffprobeBat ) or badExit( "Not able to remove temporary 'ffprobe' batch file: '" . $ffprobeBat . "': $^E, $!" );
+			toLog( " - Cleaning up temporary 'ffprobe' files\n" );
+			if ( testL( 'e', $ffprobeBat ) ) {
+				unlinkL( $ffprobeBat ) or badExit( "Not able to remove temporary 'ffprobe' batch file: '" . $ffprobeBat . "': $^E, $!" );
+			}
 		}
 	}
 
 	#set 'discnumber' to default value, if not present
 	if ( ! $tags{discnumber} ) {
 		$tags{discnumber} = 1;
-	}
-
-	#prepare file for ffmpeg to write metadata (can't write out to self) - copy original to temp file
-	toLog( " - Creating temporary song file for 'ffmpeg' to use as original song file\n" );
-	my ( $songFileName, $songFilePath ) = fileparse( abspathL( $songFile ) );
-	my $tmpSongFileName = $songFileName;
-	if ( $tmpSongFileName =~ s#(.)\.(\w\w\w\w?)$#$1_tmp\.$2#i ) {
-		wait;
-		renameL( $songFilePath . $songFileName, $songFilePath . $tmpSongFileName ) or badExit( "Not able to rename song file: '" . $songFilePath . $songFileName . "' to temp file: '" . $songFilePath . $tmpSongFileName . "', $!, $^E\n" );
-		wait;
-	}
-
-	#create array of metadata tag args to add in ffmpeg (will splice into command args array)
-	toLog( " - Creating 'ffmpeg' arguments for submission of metadata to song file\n" );
-	my @newMeta;
-	foreach my $key ( keys %tags ) {
-		#fix any keys that have double quotes - to escaped single quote
-		$key =~ s#"#\\'#g;
-		#escape double quotes in values
-		$tags{$key} =~ s#"#\\"#g;
-		#replace any values that contain newline characters
-		$tags{$key} =~ s#\r?\n#,#g;
-		#replace any values above unicode
-		if ( $tags{$key} =~ m#[^\x00-\x7F]# ) {
-			$tags{$key} = charReplace( $tags{$key} );
-		}
-		#fix any keys that have whitespace in the name
-		if ( $key =~ m#\s# ) {
-			$key = "\"$key\"";
-		}
-		if ( ! $tags{$key} ) {
-			push( @newMeta, "-metadata $key=\"\"" );
-		} else {
-			push( @newMeta, "-metadata $key=\"" . $tags{$key} . "\"" );
-		}
-	}
-
-	toLog( " - Building 'ffmpeg' command statement\n" );
-	my @ffmpeg = ( 
-		#ffmpeg executable
-		'"' . 'C:\\Users\\rich\\Documents\\Dev\\ffmpeg\\FFmpeg-exe\\bin\\ffmpeg.exe' . '"',
-		#input file is temporary song file
-		'-i "' . $songFilePath . $tmpSongFileName . '"',
-		#wipe existing metadata - fix some files not accepting changes if not cleared first
-		'-map_metadata -1',
-		#copy audio, no need for encoding/decoding
-		'-c:a copy',
-		#force ID3v2.3 tag version
-		'-id3v2_version 3',
-		#don't return numerous lines of output from 'ffmpeg'
-		'-v quiet',
-		#copy timestamp - copy song file, don't encode
-		'-copyts',
-		#for timestamp copy - start timestamp at 0
-		'-start_at_zero',
-		#hide extra info from ffmpeg
-		'-hide_banner',
-		#overwrite existing
-		'-y',
-		#no video
-		'-vn',
-		#output song file
-		'"' . $songFilePath . $songFileName . '"'
-	);
-	#splice in array of '-metadata' switches into @ffmpeg args
-	splice( @ffmpeg, 11, 0, @newMeta );
-	toLog( " - System command to rewrite song metadata with 'ffmpeg': '" . join( " ", @ffmpeg ) . "'\n" );
-
-	#start process to create batch file with 'ffmpeg' commands
-	my $ffmpegBat = $ENV{TEMP} . $FS . 'ffmpeg-' . $num . '.bat';
-	#batch file handle ref
-	my $ffmpegFH;
-	#open/close batch file with commands written to it
-	toLog( " - Creating batch file with 'ffmpeg' commands: '" . $ffmpegBat . "'\n" );
-	openL( \$ffmpegFH, '>:encoding(UTF-8)', $ffmpegBat ) or badExit( "Not able to create temporary batch file to run 'ffmpeg': $^E, $!" );
-		my $prevfh = select $ffmpegFH; $| = 1; select $prevfh;
-		#write empty line to batch file in case of file header conflict
-		print $ffmpegFH "\n" . 'chcp 65001' . "\n" . 'call ' . join( " ", @ffmpeg );
-	close( $ffmpegFH );
-
-	#execute batch file wrapper to call 'ffmpeg' commands batch file
-	toLog( " - Executing batch file for 'ffmpeg'\n" );
-	my $outAndError;
-	run3( $ffmpegBat, \undef, \$outAndError, \$outAndError );
-	badExit( "Not able to run batch file wrapper: " . $ffmpegBat . ", returned: " . $? . ", and: " . $outAndError ) if ( $? );
-
-	#removing temp song file & 'ffmpeg' batch file, if successful
-	toLog( " - Removing temporary song files & batch files\n" );
-	if ( testL( 'e', $songFile ) ) {
-		unlinkL( $songFilePath . $tmpSongFileName ) or badExit( "Not able to remove temporary song file: '" . $songFilePath . $tmpSongFileName . "': $^E, $!" );
-		unlinkL( $ffmpegBat ) or badExit( "Not able to remove temporary 'ffmpeg' batch file: '" . $ffmpegBat . "': $^E, $!" );
-	} else {
-		badExit( "Not able to remove temporary song file & batch files for song file: '" . $songFile . "'" );
-	}
-
-	#check crucial tags in @listOfID3Tags for values
-	toLog( " - Scanning tags to see if any desired tags are not defined\n" );
-	foreach my $tag ( @listOfID3Tags ) {
-		if ( ! $tags{$tag} ) {
-			toLog( "    - '$tag' tag is not declared\n" );
-		}
 	}
 
 	#write out XML to file of metadata for song file
