@@ -4,7 +4,8 @@
 #
 #	File: update_ID3_tags.pl
 #	Desc: updates ID3 metadata with XML input for song files (then uses command tools to populate remaining 
-#       undefined tags), must pass playlist XML file to program in command-line
+#       undefined tags) and updates metadata to song files, must pass playlist XML file to program in 
+#       command-line
 #
 # Usage:  perl C:\git_playlist\update_ID3_tags.pl [PLAYLIST_XML_FILE]
 #
@@ -26,14 +27,17 @@
 #                                 line args for Windows) / reformatted some coding
 #         1.5  -  20 Jan 2026 RAD changed substitution of double quote in writeTags() from character to 
 #                                 hex entity / updated error message when running exifTool
+#         1.6  -  21 Jan 2026 RAD removed escaping of single quotes in writeTags() / updated description / 
+#                                 removed Encode pragma / added 'else' to if loop when not matching 
+#                                 established song file type when calling extract metadata method
 #
 #
 #   TO-DO:
-#         1) determine 'bitrate' for .mkv song files
+#         1) determine 'bitrate' for .mkv song files / write 'track' to .mkv song files
 #
 #**********************************************************************************************************
 
-my $Version = "1.5";
+my $Version = "1.6";
 
 use strict;
 use warnings;
@@ -43,7 +47,6 @@ use open ':std', IO => ':raw :encoding(UTF-8)';
 
 use Carp qw( croak longmess shortmess );
 use Data::Dumper qw( Dumper );
-use Encode qw( encode );
 use File::Basename qw( fileparse );
 #specify config file for ExifTool
 #-x-BEGIN { $Image::ExifTool::configFile = 'C:\Users\rich\.ExifTool_config' }
@@ -99,7 +102,7 @@ my @listOfTagArrays = (
 	[ 'genre' ],
 	[ 'publisher' ],
 	[ 'title', 'titlesortorder', 'titlesort' ],
-	[ 'track', 'tracknumber', 'trackid' ],
+	[ 'track', 'tracknumber', 'part_number', 'trackid' ],
 	[ 'year', 'date', 'originaldate', 'originalreleaseyear', 'release date', 'datetimeoriginal', 'recordingdates' ]
 );
 
@@ -187,14 +190,18 @@ foreach my $songNode ( $dom->findnodes( '//song' ) ) {
 		}
 	}
 
-	#determine song file type to call best method for ID3 metadata editing
+	#determine song file type to call best method for ID3 metadata extracting
 	if ( $songFile =~ m#\.mkv$#i ) {
 		mkvTools( \%tags, $songFile );
 	} elsif ( $songFile =~ m#\.mp3$#i ) {
 		exifTools( \%tags, $songFile );
 	} elsif ( $songFile =~ m#\.m4a$#i ) {
 		exifTools( \%tags, $songFile );
+	} elsif ( $songFile =~ m#\.aiff$#i ) {
+		exifTools( \%tags, $songFile );
 	} elsif ( $songFile =~ m#\.(ogg|flac)$#i ) {
+		exifTools( \%tags, $songFile );
+	} else {
 		exifTools( \%tags, $songFile );
 	}
 
@@ -469,7 +476,7 @@ sub cleanTags {
 			if ( ( exists $tagsRef->{ensemble} ) && ( ! $tagsRef->{ensemble} ) ) {
 				$tagsRef->{ensemble} = $tagsRef->{$key};
 			}
-			#rename certain tags to .m4a-specific tags
+			#rename certain tags to .m4a or .mkv specific tags
 			if ( $songFile =~ m#\.m4a$#i ) {
 				$tagsRef->{author} = $tagsRef->{$key} unless ( $tagsRef->{author} );
 				$tagsRef->{album_artist} = $tagsRef->{albumartist} unless ( $tagsRef->{album_artist} );
@@ -771,12 +778,11 @@ sub writeTags {
 	foreach my $key ( keys %{$tagsRef} ) {
 		#create variable for metadata key (keys with spaces can cause to fail content test)
 		my $metaKey = $key;
-		#escape any keys that have single quote
-		$metaKey =~ s#'#\\'#g;
+		#remove escaped single quote from entries (added in previous versions v1.4 & v1.5 of 'update_ID3_tags')
+		$metaKey =~ s#\\'##g;
+		$tagsRef->{$key} =~ s#\\'##g;
 		#use Unicode curved double quote in key
 		$metaKey =~ s#"#\x{94}#g;
-		#escape any values that have single quote
-		$tagsRef->{$key} =~ s#'#\\'#g;
 		#use Unicode curved double quote in value
 		$tagsRef->{$key} =~ s#"#\x{94}#g;
 		#replace any values that contain newlines
