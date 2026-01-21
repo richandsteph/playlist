@@ -24,6 +24,8 @@
 #         1.4  -  20 Jan 2026 RAD changed substitution of double quote in writeTags() key & value to use 
 #                                 Unicode double quote (keybaord double quote is not allowed in command 
 #                                 line args for Windows) / reformatted some coding
+#         1.5  -  20 Jan 2026 RAD changed substitution of double quote in writeTags() from character to 
+#                                 hex entity / updated error message when running exifTool
 #
 #
 #   TO-DO:
@@ -31,7 +33,7 @@
 #
 #**********************************************************************************************************
 
-my $Version = "1.4";
+my $Version = "1.5";
 
 use strict;
 use warnings;
@@ -388,7 +390,7 @@ sub exifTools {
 	toLog( "   - Executing batch file for 'exiftool'\n" );
 	my ( $songFileJson, $stdOutErr );
 	run3( $jsonBat, \undef, \$songFileJson, \$stdOutErr );
-	badExit( "Not able to run batch file wrapper: '" . $jsonBat . "', returned: " . $? . ", and: " . $stdOutErr ) if ( $? );
+	badExit( "ExifTool is not able to read the metadata of the file, returned: " . $? . ", and: " . $stdOutErr ) if ( $? );
 	my $jsonTxt;
 	if ( $songFileJson =~ m#(\n\[\{.+)#s ) {
 		$jsonTxt = $1;
@@ -772,11 +774,11 @@ sub writeTags {
 		#escape any keys that have single quote
 		$metaKey =~ s#'#\\'#g;
 		#use Unicode curved double quote in key
-		$metaKey =~ s#"#”#g;
+		$metaKey =~ s#"#\x{94}#g;
 		#escape any values that have single quote
 		$tagsRef->{$key} =~ s#'#\\'#g;
 		#use Unicode curved double quote in value
-		$tagsRef->{$key} =~ s#"#”#g;
+		$tagsRef->{$key} =~ s#"#\x{94}#g;
 		#replace any values that contain newlines
 		$tagsRef->{$key} =~ s#\r?\n#,#g;
 		if ( ! $tagsRef->{$key} ) {
