@@ -106,6 +106,20 @@
 #                                  or 'duration' set / added 'part_number' for 'track' metadata in .mkv 
 #                                  song file / lowercased tag keys / removed 'ffmpeg' code to NOT update 
 #                                  metadata to song file / removed unused @listOfID3Tags
+#          2.3 -  25 Jan 2026  RAD modified output to console to only list song filename as processing / 
+#                                  corrected substitution pattern of drive letter in path to UNC / removed 
+#                                  space in 'release date', replaced with underscore; removed 'album 
+#                                  artist; reordered 'partofset' before 'disk' / added @listOfTagArrays 
+#                                  for prioritizing tag names & their values / added 'titlesortorder' & 
+#                                  'titlesort' to @listOfAllTags / when checking for song file type to 
+#                                  call command-line tools, used song filename instead of song file path / 
+#                                  lowercased tag name when reading $songFileXml / removed initial cap of 
+#                                  tag names (using global lowercase) / when creating JSON from song 
+#                                  metadata, using direct STDOUT variable to capture data / added test of 
+#                                  existence when stripping extra artist info from 'albumartist' / added 
+#                                  'part_number' for 'track' value in .mkv songs / change match pattern 
+#                                  when determining song file values from filename - no longer requires 
+#                                  track no. in filename
 #
 #
 #   TO-DO:
@@ -113,7 +127,7 @@
 #
 #**********************************************************************************************************
 
-my $Version = "2.2";
+my $Version = "2.3";
 
 use strict;
 use warnings;
@@ -144,6 +158,23 @@ my $fileName = fileparse( $0 );
 $fileName =~ s#\.\w\w\w?$##;
 my $logFile = "$fileName.log";
 startLog( $logFile );
+
+#array list of possible ID3 tag names in nested arrays (priority is 1st item in sub-array)
+my @listOfTagArrays = (
+	[ 'albumartist', 'album_artist', 'albumartistsortorder', 'albumartistsort' ],
+	[ 'album', 'originalalbum', 'albumsortorder', 'albumsort' ],
+	[ 'artist', 'originalartist', 'artistsortorder', 'artistsort', 'ensemble', 'band', 'author' ],
+	[ 'bitrate', 'bit_rate', 'audiobitrate' ],
+	[ 'comment', 'comment-xxx' ],
+	[ 'composer' ],
+	[ 'discnumber', 'disc', 'partofset', 'disk' ],
+	[ 'length', 'duration' ],
+	[ 'genre' ],
+	[ 'publisher' ],
+	[ 'title', 'titlesortorder', 'titlesort' ],
+	[ 'track', 'tracknumber', 'part_number', 'trackid' ],
+	[ 'year', 'date', 'originaldate', 'originalreleaseyear', 'release_date', 'datetimeoriginal', 'recordingdates' ]
+);
 
 #set directories of song files from current and recursive directories
 my @workDir = getcwdL() or badExit( "Not able to get working directory with 'getcwdL()'" );
@@ -207,6 +238,7 @@ my $num = 0;
 foreach my $songFile ( @fileLst ) {
 	#song counter for XML file output
 	++$num;
+	
 	#list of ID3 possible tag names
 	my @listOfAllTags = (
 		'album_artist',
@@ -234,23 +266,28 @@ foreach my $songFile ( @fileLst ) {
 		'part_number',
 		'partofset',
 		'path',
+		'titlesortorder',
+		'titlesort',
 		'title',
 		'trackid',
 		'tracknumber',
 		'track',
 		'year'
 	);
-
+	
 	#echo status to console
-	toLog( 'Processing song file: "' . $songFile . "\"...\n" );
+	my $songFileName;
+	( $songFileName ) = fileparse( abspathL ( $songFile ) );
+	toLog( "Processing song no. " . $num . ": '" . $songFile . "'\n" );
 	binmode( STDOUT, ":encoding(UTF-8)" );
-	print "\n   Processing '$songFile'\n";
+	print "\n" if ( $num == 1 );
+	print "   - processing song no. " . $num . ": '" . $songFileName . "'\n";
 
 	#set per song hash for tag metadata
 	my %tags;
 
 	#if song file is 'mkv' format, use 'mkvextract' for tag extraction
-	if ( $songFile =~ m#\.mkv$#i ) {
+	if ( $songFileName =~ m#\.mkv$#i ) {
 		toLog( " - Preparing for 'mkvextract' to export metadata tags from song file\n" );
 		my $mkvCmd = 'C:\Program Files\MKVToolNix\mkvextract.exe';
 		my $songFileXml = $songFile . '.xml';
@@ -290,23 +327,9 @@ foreach my $songFile ( @fileLst ) {
 		close( $xmlFH );
 
 		foreach my $xmlNode ( $dom->findnodes( '//Simple' ) ) {
-			my $tagName = $xmlNode->findvalue( './Name' );
+			my $tagName = lc( $xmlNode->findvalue( './Name' ) );
 			my $tagValue = $xmlNode->findvalue( './String' );
 			if ( grep /$tagName/i, @listOfAllTags ) {
-				#tag names should be initial-capped
-				if ( $tagName =~ m#ALBUMARTISTSORTORDER# ) {
-					$tagName = 'albumartistsortorder';
-				} elsif ( $tagName =~ m#ALBUMARTISTSORT# ) {
-					$tagName = 'albumartistsort';
-				} elsif ( $tagName =~ m#ALBUM_ARTIST# ) {
-					$tagName = 'albumartist';
-				} elsif ( $tagName =~ m#ARTISTSORTORDER# ) {
-					$tagName = 'artistsortorder';
-				} elsif ( $tagName =~ m#ARTISTSORT# ) {
-					$tagName = 'artistsort';
-				} elsif ( $tagName =~ m#^[A-Z]# ) {
-					$tagName =~ s#([\w']+)#\L$1\E#
-				}
 				$tags{$tagName} = $tagValue;
 			}
 		}
@@ -324,14 +347,11 @@ foreach my $songFile ( @fileLst ) {
 		#arguments for calling 'exiftool' command-line program
 		my $exifToolCmd = 'C:\Strawberry\perl\site\bin\exiftool';
 		my $exifToolArgsFile = $ENV{TEMP} . $FS . 'exiftoolargs-' . $num . '.txt';
-		my $songFileJson = $songFile . '.json';
 		my @exifToolArgs = (
 			#exiftool command-line program
 			'"' . $exifToolCmd . '"',
 			#read arguments from text file
-			'-@ ' . '"' . $exifToolArgsFile . '"',
-			#redirect output to JSON file
-			'>"' . $songFileJson . '"'
+			'-@ ' . '"' . $exifToolArgsFile . '"'
 		);
 		my @exifToolFileArgs = (
 		#set encoding for filenames, also sets wide-character I/O
@@ -358,55 +378,55 @@ foreach my $songFile ( @fileLst ) {
 		my $jsonBat = $ENV{TEMP} . $FS . 'exiftool-' . $num . '.bat';
 		my ( $jsonBatFH, $jsonFH, $argsFH );
 		#open/close batch file with commands written to it
-		toLog( " - Creating batch file wrapper for 'exiftool': '" . $jsonBat . "'\n" );
-		openL( \$jsonBatFH, '>:encoding(UTF-8)', $jsonBat ) or badExit( "Not able to create temporary batch file to run 'exiftool': $^E, $!" );
+		toLog( "   - Creating batch file wrapper for 'exiftool': '" . $jsonBat . "'\n" );
+		openL ( \$jsonBatFH, '>:encoding(UTF-8)', $jsonBat ) or badExit( "Not able to create temporary batch file to run 'exiftool': $^E, $!" );
 			my $oldFH = select $jsonBatFH; $| = 1; select $oldFH;
 			print $jsonBatFH "\n" . 'chcp 65001' . "\n" . 'call ' . join( " ", @exifToolArgs );
 		close( $jsonBatFH );
 		#open/close 'exiftool' args file with arguments written to it
-		toLog( " - Creating argument file for 'exiftool': '" . $exifToolArgsFile . "'\n" );
-		openL( \$argsFH, '>:encoding(UTF-8)', $exifToolArgsFile ) or badExit( "Not able to create temporary arguments file to run 'exiftool': $^E, $!" );
+		toLog( "   - Creating argument file for 'exiftool': '" . $exifToolArgsFile . "'\n" );
+		openL ( \$argsFH, '>:encoding(UTF-8)', $exifToolArgsFile ) or badExit( "Not able to create temporary arguments file to run 'exiftool': $^E, $!" );
 			$oldFH = select $argsFH; $| = 1; select $oldFH;
 			print $argsFH @exifToolFileArgs;
 		close( $argsFH );
-
+	
 		#execute batch file wrapper to call 'exiftool' command batch file
-		toLog( " - Executing batch file for 'exiftool'\n" );
-		my $stdOutErr;
-		run3( $jsonBat, \undef, \$stdOutErr, \$stdOutErr );
-		badExit( "Not able to run batch file wrapper: '" . $jsonBat . "', returned: " . $? . ", and: " . $stdOutErr ) if ( $? );
-		
-		#read in json data for song file
-		openL( \$jsonFH, '<:encoding(UTF-8)', $songFileJson ) or badExit( "Not able to open JSON data file: '" . $songFileJson . "', $^E, $!" );
-			local $/;
-			my $jsonTxt = <$jsonFH>;
-		close( $jsonFH );
-		my $json = JSON->new;
-		my $jsonData = $json->decode( $jsonTxt );
-
+		toLog( "   - Executing batch file for 'exiftool'\n" );
+		my ( $songFileJson, $stdOutErr );
+		run3( $jsonBat, \undef, \$songFileJson, \$stdOutErr );
+		badExit( "ExifTool is not able to read the metadata of the file, returned: " . $? . ", and: " . $stdOutErr ) if ( $? );
+		my $jsonTxt;
+		if ( $songFileJson =~ m#(\n\[\{.+)#s ) {
+			$jsonTxt = $1;
+		}
+		#parse json data for song file
+		my $json = JSON->new->utf8();
+		my $jsonDataRef = $json->decode( $jsonTxt );
+		badExit( "JSON data not created for song file: '" . $songFile . "'" ) unless ( $jsonDataRef );
+	
 		#create hashref for hash of tags => values
-		my $tagsArray = $jsonData;
-		foreach my $key ( keys %{${$tagsArray}[0]} ) {
+		my $tagsInnerHashRef = \%{${$jsonDataRef}[0]};
+		foreach my $key ( keys %{$tagsInnerHashRef} ) {
+			#set to lowercase version of keys
 			my $lcKey = lc( $key );
 			#check MKV tag names and substitute to actual tag name
-			if ( grep /$lcKey/, @listOfAllTags ) {
-				$tags{$lcKey} = ${$tagsArray}[0]{$lcKey};
+			foreach my $jsonRef ( @listOfTagArrays ) {
+				if ( grep /$lcKey/, @{$jsonRef} ) {
+					$tags{$lcKey} = $tagsInnerHashRef->{$key} unless ( $tags{$lcKey} );
+				}
 			}
 		}
 		toLog( " - Cleaning up temporary 'exiftool' files\n" );
-		if ( testL( 'e', $songFileJson ) ) {
+		if ( ( testL( 'e', $jsonBat ) ) || ( testL( 'e', $exifToolArgsFile ) ) ) {
 			unlinkL( $jsonBat ) or badExit( "Not able to remove temporary 'exiftool' batch file: '" . $jsonBat . "': $^E, $!" );
-			unlinkL( $songFileJson ) or badExit( "Not able to remove JSON data for song file: '" . $songFileJson . "': $^E, $!" );
 			unlinkL( $exifToolArgsFile ) or badExit( "Not able to remove arguments file for 'exiftool': '" . $exifToolArgsFile . "': $^E, $!" );
-		} else {
-			badExit( "JSON data not created for song file: '" . $songFile . "'" );
 		}
 	}
 
 	#checking each tag - to set/clean-up values and/or delete values
 	toLog( " - Examining each tag retrieved\n" );
 	foreach my $key ( keys %tags ) {
-		#set 'album artist' if not specified
+		#set 'albumartist' if not specified
 		if ( $key =~ m#^artist$#i ) {
 			#lowercase key
 			my $lcKey = lc( $key );
@@ -415,17 +435,17 @@ foreach my $songFile ( @fileLst ) {
 				$tags{$lcKey} = $tags{$key};
 				delete $tags{$key};
 			}
-			#correct previous error in diagnostic testing for 'AC/DC'
+			#correct 'AC/DC'
 			$tags{$lcKey} =~ s#^AC[_ ]DC$#AC\/DC#i;
 			if ( $tags{'album_artist'} ) {
 				$tags{albumartist} = $tags{'album_artist'};
-				#correct previous error in diagnostic testing for 'AC/DC'
+				#correct 'AC/DC'
 				$tags{albumartist} =~ s#^AC[_ ]DC$#AC\/DC#i;
 				#remove for preferred 'albumartist' key
 				delete $tags{'album_artist'};
 			} elsif ( $tags{'ALBUM_ARTIST'} ) {
 				$tags{albumartist} = $tags{'ALBUM_ARTIST'};
-				#correct previous error in diagnostic testing for 'AC/DC'
+				#correct 'AC/DC'
 				$tags{albumartist} =~ s#^AC[_ ]DC$#AC\/DC#i;
 				#remove for preferred 'albumartist' key
 				delete $tags{'ALBUM_ARIST'};
@@ -433,7 +453,7 @@ foreach my $songFile ( @fileLst ) {
 			$tags{albumartist} = $tags{$lcKey} if ( ! $tags{albumartist} );
 		}
 		#remove extra artist info
-		$tags{albumartist} =~ s#^([^;]+)(?<!&amp);.*$#$1#;
+		$tags{albumartist} =~ s#^([^;]+)(?<!&amp);.*$#$1# if ( $tags{albumartist} );
 		if ( $key =~ m#^artists$#i ) {
 			#lowercase key
 			my $lcKey = lc( $key );
@@ -470,7 +490,7 @@ foreach my $songFile ( @fileLst ) {
 			}
 			#remove extra artist info
 			$tags{$lcKey} =~ s#^([^;]+)(?<!&amp);.*$#$1#;
-			#correct previous error in diagnostic testing for 'AC/DC'
+			#correct 'AC/DC'
 			$tags{$lcKey} =~ s#^AC[_ ]DC$#AC\/DC#i;
 			#strip starting articles
 			$tags{$lcKey} =~ s#^(the|a|an)\s+(.+)#$2#i;
@@ -486,20 +506,20 @@ foreach my $songFile ( @fileLst ) {
 			}
 			#remove extra artist info
 			$tags{$lcKey} =~ s#^([^;]+)(?<!&amp);.*$#$1#;
-			#correct previous error in diagnostic testing for 'AC/DC'
+			#correct 'AC/DC'
 			$tags{$lcKey} =~ s#^AC[_ ]DC$#AC\/DC#i;
 			#strip starting articles
 			$tags{$lcKey} =~ s#^(the|a|an)\s+(.+)#$2#i;
 		}
-		#'track' value keyed as 'track id' or 'tracknumber' or 'part_number'
-		if ( ( $key =~ m#^tracknumber$#i ) || ( $key =~ m#^trackid$#i ) || ( $key =~ m#^part_number$#i ) ) {
+		#'track' value keyed as 'trackid' or 'tracknumber' or 'part_number'
+		if ( ( $key =~ m#^tracknumber$#i ) || ( $key =~ m#^part_number$#i ) || ( $key =~ m#^trackid$#i ) ) {
 			if ( ! $tags{track} ) {
-				#prefer 'track number' over 'track id'
+				#prefer 'tracknumber' over 'trackid'
 				if ( $key =~ m#^tracknumber$#i ) {
 					$tags{track} = $tags{$key};
-				} elsif ( $key =~ m#^trackid$#i ) {
-					$tags{track} = $tags{$key};
 				} elsif ( $key =~ m#^part_number$#i ) {
+					$tags{track} = $tags{$key};
+				} elsif ( $key =~ m#^trackid$#i ) {
 					$tags{track} = $tags{$key};
 				}
 			}
@@ -561,7 +581,7 @@ foreach my $songFile ( @fileLst ) {
 				$tags{year} = $tags{$lcKey};
 			}
 		}
-		#'year' value keyed as 'original date'
+		#'year' value keyed as 'originaldate'
 		if ( $key =~ m#^originaldate$#i ) {
 			#lowercase key
 			my $lcKey = lc( $key );
@@ -678,9 +698,12 @@ foreach my $songFile ( @fileLst ) {
 				#resetting to lowercase value
 				$tags{$lcKey} = $tags{$key};
 				delete $tags{$key};
-				if ( grep /^Minutes$/, keys %tags ) {
-					delete $tags{Minutes};
-				}
+			}
+			if ( grep /Minutes/, keys %tags ) {
+				delete $tags{Minutes};
+			}
+			if ( grep /minutes/, keys %tags ) {
+				delete $tags{minutes};
 			}
 			#if 'length' set to approximate value, clean up
 			if ( $tags{$lcKey} =~ m#\(approx\)#i ) {
@@ -700,8 +723,11 @@ foreach my $songFile ( @fileLst ) {
 			my $remSecs = $seconds - ( $minutes * 60 );
 			$remSecs = sprintf "%.02d", $remSecs;
 			#delete existing 'minutes' - diagnostic testing caused several erroneous calcs for minutes
-			if ( grep /^(minutes)$/i, keys %tags ) {
-				delete $tags{$1};
+			if ( grep /Minutes/, keys %tags ) {
+				delete $tags{Minutes};
+			}
+			if ( grep /minutes/i, keys %tags ) {
+				delete $tags{minutes};
 			}
 			$tags{minutes} = $minutes . ':' . $remSecs;
 		}
@@ -714,9 +740,12 @@ foreach my $songFile ( @fileLst ) {
 					#resetting to lowercase value
 					$tags{$lcKey} = $tags{$key};
 					delete $tags{$key};
-					if ( grep /^Minutes$/, keys %tags ) {
-						delete $tags{Minutes};
-					}
+				}
+				if ( grep /Minutes/, keys %tags ) {
+					delete $tags{Minutes};
+				}
+				if ( grep /minutes/, keys %tags ) {
+					delete $tags{minutes};
 				}
 				if ( $tags{$lcKey} =~ m#^0\.# ) {
 					delete $tags{$lcKey};
@@ -763,7 +792,7 @@ foreach my $songFile ( @fileLst ) {
 			} else {
 				$tags{album} = $album if ( ! $tags{album} );
 			}
-			#correct previous error in diagnostic testing for 'AC/DC'
+			#correct 'AC/DC'
 			$tags{artist} =~ s#^AC[_ ]DC$#AC\/DC#i;
 			if ( ! $tags{albumartist} ) {
 				$tags{albumartist} = $tags{artist};
@@ -774,22 +803,18 @@ foreach my $songFile ( @fileLst ) {
 			$tags{artist} = $1 if ( ! $tags{artist} );
 			$tags{album} = $1 if ( ! $tags{album} );
 			$tags{albumartist} = $1 if ( ! $tags{albumartist} );
-			#correct previous error in diagnostic testing for 'AC/DC'
+			#correct 'AC/DC'
 			$tags{artist} =~ s#^AC[_ ]DC$#AC\/DC#i;
 			#remove extra artist info
 			$tags{albumartist} =~ s#^([^;]+)(?<!&amp);.*$#$1#;
-			#correct previous error in diagnostic testing for 'AC/DC'
+			#correct 'AC/DC'
 			$tags{albumartist} =~ s#^AC[_ ]DC$#AC\/DC#i;
 		}
 
-		if ( $fileName =~ m#((\d)\-)?(\d+)\s*\-?\s+([^\\]+)\.(aac|alac|flac|m4a|mka|mkv|mp3|ogg|wma)$#i ) {
+		if ( $fileName =~ m#((\d)-)?(\d*)\s*-?\s*([^\\]+)\.(aac|alac|flac|m4a|mka|mkv|mp3|ogg|wma)$#i ) {
 			$tags{title} = $4 if ( ! $tags{title} );
-			if ( ! $tags{track} ) {
-				$tags{track} = $3;
-			}
-			if ( ( $2 ) && ( ! $tags{discnumber} ) ) {
-				$tags{discnumber} = $2;
-			}
+			$tags{track} = $3 if ( ! $tags{track} );
+			$tags{discnumber} = $2 if ( ( $2 ) && ( ! $tags{discnumber} ) );
 		}
 
 		if ( ( ! $tags{length} ) && ( ! $tags{duration} ) ) {
@@ -916,7 +941,7 @@ foreach my $songFile ( @fileLst ) {
 	#replace extraneous characters for adding <path> content
 	my $songFileClean = charReplace( $songFile );
 	#clean up path
-	if ( $songFileClean =~ s#^[A-Z]\:[\\\/]Music[\\\/]#\\\\DavisServer_1\\Music\\#i ) {
+	if ( $songFileClean =~ s#^[A-Za-z]:[\\\/]#\\\\DavisServer_1\\Movies_Music_Pics\\#i ) {
 		#replace 'M:\' drive letter path with UNC path
 		toLog( " - Replacing drive letter with UNC path\n" );
 		#replace any remaining forward slashes with backslashes
