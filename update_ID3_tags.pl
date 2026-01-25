@@ -30,6 +30,18 @@
 #         1.6  -  21 Jan 2026 RAD removed escaping of single quotes in writeTags() / updated description / 
 #                                 removed Encode pragma / added 'else' to if loop when not matching 
 #                                 established song file type when calling extract metadata method
+#         1.7  -  25 Jan 2026 RAD added console output when song doesn't exist / cleaned up match 
+#                                 expression to get 'title' in extractTags() when 'title', 'artist', etc. 
+#                                 tags not set / changed substitution of double quote in tag key/value to 
+#                                 use unicode notation as replacement character / moved double quote 
+#                                 substitution with Unicode double quote from writeTags() to cleanTags() / 
+#                                 moved 'sleep 1' from before renameL() to after (before test of 
+#                                 existence) / removed space from 'release date', replaced with underscore; 
+#                                 removed 'album artist' from @listOfTagArrays; reordered 'part_number' to 
+#                                 before 'disk' / changed loops to start & end with '0' base item in 
+#                                 cleanTags() / changed requirement of track no. present in filename 
+#                                 pattern when determining tags with filename in extractTags() / removed 
+#                                 removal of single quotes from tag name & value in writeTags()
 #
 #
 #   TO-DO:
@@ -37,7 +49,7 @@
 #
 #**********************************************************************************************************
 
-my $Version = "1.6";
+my $Version = "1.7";
 
 use strict;
 use warnings;
@@ -91,19 +103,19 @@ my @listOfXmlTags = (
 
 #array list of possible ID3 tag names in nested arrays (priority is 1st item in sub-array)
 my @listOfTagArrays = (
-	[ 'albumartist', 'album_artist', 'album artist', 'albumartistsortorder', 'albumartistsort' ],
+	[ 'albumartist', 'album_artist', 'albumartistsortorder', 'albumartistsort' ],
 	[ 'album', 'originalalbum', 'albumsortorder', 'albumsort' ],
 	[ 'artist', 'originalartist', 'artistsortorder', 'artistsort', 'ensemble', 'band', 'author' ],
 	[ 'bitrate', 'bit_rate', 'audiobitrate' ],
 	[ 'comment', 'comment-xxx' ],
 	[ 'composer' ],
-	[ 'discnumber', 'disc', 'disk', 'partofset' ],
+	[ 'discnumber', 'disc', 'partofset', 'disk' ],
 	[ 'length', 'duration' ],
 	[ 'genre' ],
 	[ 'publisher' ],
 	[ 'title', 'titlesortorder', 'titlesort' ],
 	[ 'track', 'tracknumber', 'part_number', 'trackid' ],
-	[ 'year', 'date', 'originaldate', 'originalreleaseyear', 'release date', 'datetimeoriginal', 'recordingdates' ]
+	[ 'year', 'date', 'originaldate', 'originalreleaseyear', 'release_date', 'datetimeoriginal', 'recordingdates' ]
 );
 
 #pull in playlist XML filename from command-line args
@@ -175,7 +187,9 @@ foreach my $songNode ( $dom->findnodes( '//song' ) ) {
 				binmode( STDOUT, ":encoding(UTF-8)" );
 				print "     - processing song no. " . $num . ": '" . $songFileName . "'\n";
 			} else {
-				warning( "Song no. " . $num . " file: '" . $songFile . "' does not exist" );
+				binmode( STDOUT, ":encoding(UTF-8)" );
+				print "   Song no. " . $num . " : '" . $songFileName . "' does not exist\n";
+				warning( "Song no. " . $num . " : '" . $songFile . "' does not exist" );
 			}
 		} elsif ( $nodeName =~ m#^track$# ) {
 			$tags{$nodeName} = $nodeContent if ( $nodeContent );
@@ -438,13 +452,13 @@ sub cleanTags {
 		my $priorityTagName = $listOfTagArrays[$tagsRow][0];
 		#save initial base value
 		my $priorityTagValue = $tagsRef->{$priorityTagName};
-		for ( my $tagsCol = $#{$innerArrayRef}; $tagsCol >= 1; $tagsCol-- ) {
+		for ( my $tagsCol = $#{$innerArrayRef}; $tagsCol >= 0; $tagsCol-- ) {
 			my $tagName = $listOfTagArrays[$tagsRow][$tagsCol];
 			$tagsRef->{$priorityTagName} = $tagsRef->{$tagName} if ( $tagsRef->{$tagName} );
 		}
 		#reset base value to starting value, before setting all others
 		$tagsRef->{$priorityTagName} = $priorityTagValue if ( $priorityTagValue );
-		for my $tagsCol ( 1 .. $#{$innerArrayRef} ) {
+		for my $tagsCol ( 0 .. $#{$innerArrayRef} ) {
 			my $tagName = $listOfTagArrays[$tagsRow][$tagsCol];
 			#only set when original had a value
 			$tagsRef->{$tagName} = $tagsRef->{$priorityTagName} if ( $tagsRef->{$tagName} );
@@ -452,9 +466,12 @@ sub cleanTags {
 	}
 
 	foreach my $key ( keys %{$tagsRef} ) {
+		#use Unicode curved double quote in $tagsRef value
+		$tagsRef->{$key} =~ s#"#\N{U+201D}#g;
+
 		#clean 'artist'
 		if ( $key =~ m#^artist$# ) {
-			#correct previous error in diagnostic testing for 'AC/DC'
+			#correct 'AC/DC'
 			$tagsRef->{$key} =~ s#^AC[_ ]DC$#AC\/DC#i;
 			#set 'albumartist' if not specified
 			if ( ! $tagsRef->{albumartist} ) {
@@ -481,7 +498,7 @@ sub cleanTags {
 				$tagsRef->{author} = $tagsRef->{$key} unless ( $tagsRef->{author} );
 				$tagsRef->{album_artist} = $tagsRef->{albumartist} unless ( $tagsRef->{album_artist} );
 			} elsif ( $songFile =~ m#\.mkv$#i ) {
-				$tagsRef->{'album artist'} = $tagsRef->{albumartist} unless ( $tagsRef->{'album artist'} );
+				$tagsRef->{'album_artist'} = $tagsRef->{albumartist} unless ( $tagsRef->{'album_artist'} );
 				$tagsRef->{artists} = $tagsRef->{$key} unless ( $tagsRef->{artists} );
 			}
 		} elsif ( $key =~ m#^title$# ) {
@@ -492,7 +509,7 @@ sub cleanTags {
 				$tagsRef->{titlesortorder} =~ s#^(the|a|an)\s+(.+)#$2#i;
 			}
 		} elsif ( $key =~ m#^albumartist$# ) {
-			#correct previous error in diagnostic testing for 'AC/DC'
+			#correct 'AC/DC'
 			$tagsRef->{$key} =~ s#^AC[_ ]DC$#AC\/DC#i;
 			#remove extra artist info
 			$tagsRef->{$key} =~ s#^([^;]+)(?<!&amp);.*$#$1#;
@@ -513,7 +530,7 @@ sub cleanTags {
 			if ( $songFile =~ m#\.(ogg|flac)$#i ) {
 				$tagsRef->{tracknumber} = $tagsRef->{$key} unless ( $tagsRef->{tracknumber} );
 			} elsif ( $songFile =~ m#\.mkv$#i ) {
-				$tagsRef->{'track number'} = $tagsRef->{$key} unless ( $tagsRef->{'track number'} );
+				$tagsRef->{'part_number'} = $tagsRef->{$key} unless ( $tagsRef->{'part_number'} );
 			}
 		} elsif ( $key =~ m#^year$#i ) {
 			#remove duplicates, etc. from 'year' value
@@ -609,7 +626,7 @@ sub extractTags {
 		} else {
 			$tagsRef->{album} = $album if ( ! $tagsRef->{album} );
 		}
-		#correct previous error in diagnostic testing for 'AC/DC'
+		#correct 'AC/DC'
 		$tagsRef->{artist} =~ s#^AC[_ ]DC$#AC\/DC#i;
 		if ( ! $tagsRef->{albumartist} ) {
 			$tagsRef->{albumartist} = $tagsRef->{artist};
@@ -621,22 +638,18 @@ sub extractTags {
 		$tagsRef->{artist} = $1 if ( ! $tagsRef->{artist} );
 		$tagsRef->{album} = $1 if ( ! $tagsRef->{album} );
 		$tagsRef->{albumartist} = $1 if ( ! $tagsRef->{albumartist} );
-		#correct previous error in diagnostic testing for 'AC/DC'
+		#correct 'AC/DC'
 		$tagsRef->{artist} =~ s#^AC[_ ]DC$#AC\/DC#i;
 		#remove extra artist info
 		$tagsRef->{albumartist} =~ s#^([^;]+)(?<!&amp);.*$#$1#;
-		#correct previous error in diagnostic testing for 'AC/DC'
+		#correct 'AC/DC'
 		$tagsRef->{albumartist} =~ s#^AC[_ ]DC$#AC\/DC#i;
 	}
 
-	if ( $fileName =~ m#((\d)\-)?(\d+)\s*\-?\s+([^\\]+)\.(aac|alac|flac|m4a|mka|mkv|mp3|ogg|wma)$#i ) {
+	if ( $fileName =~ m#((\d)-)?(\d*)\s*-?\s*([^\.]+)\.(aac|alac|flac|m4a|mka|mkv|mp3|ogg|wma)$#i ) {
 		$tagsRef->{title} = $4 if ( ! $tagsRef->{title} );
-		if ( ! $tagsRef->{track} ) {
-			$tagsRef->{track} = $3;
-		}
-		if ( ( $2 ) && ( ! $tagsRef->{discnumber} ) ) {
-			$tagsRef->{discnumber} = $2;
-		}
+		$tagsRef->{track} = $3 if ( ! $tagsRef->{track} );
+		$tagsRef->{discnumber} = $2 if ( ( $2 ) && ( ! $tagsRef->{discnumber} ) );
 	}
 
 	if ( ( ! $tagsRef->{length} ) && ( ! $tagsRef->{duration} ) ) {
@@ -765,8 +778,8 @@ sub writeTags {
 		#verifying file is not left open by other process
 		close( $songFilePath . $tmpSongFileName );
 		close( $songFilePath . $songFileName );
-		sleep 1;
 		renameL ( $songFilePath . $songFileName, $songFilePath . $tmpSongFileName );
+		sleep 1;
 		if ( ! testL ( 'e', $songFilePath . $tmpSongFileName ) ) {
 			badExit( "Not able to rename song file: '" . $songFilePath . $songFileName . "' to temp file: '" . $songFilePath . $tmpSongFileName . "', $!, $^E\n" );
 		}
@@ -778,13 +791,8 @@ sub writeTags {
 	foreach my $key ( keys %{$tagsRef} ) {
 		#create variable for metadata key (keys with spaces can cause to fail content test)
 		my $metaKey = $key;
-		#remove escaped single quote from entries (added in previous versions v1.4 & v1.5 of 'update_ID3_tags')
-		$metaKey =~ s#\\'##g;
-		$tagsRef->{$key} =~ s#\\'##g;
 		#use Unicode curved double quote in key
-		$metaKey =~ s#"#\x{94}#g;
-		#use Unicode curved double quote in value
-		$tagsRef->{$key} =~ s#"#\x{94}#g;
+		$metaKey =~ s#"#\N{U+201D}#g;
 		#replace any values that contain newlines
 		$tagsRef->{$key} =~ s#\r?\n#,#g;
 		if ( ! $tagsRef->{$key} ) {
