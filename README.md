@@ -21,7 +21,7 @@ Playlist XML example:
     <bitrate unit="kbps">1616</bitrate>
     <length minutes="3:41">221</length>
     <comment></comment>
-    <path>\DavisServer_1\Movies_Music_Pics\Music\Alanis Morissette\Jagged Little Pill [Explicit]\04 - Hand In My Pocket.flac</path>
+    <path>\\[SERVER]\[SHARE]\Music\Alanis Morissette\Jagged Little Pill [Explicit]\04 - Hand In My Pocket.flac</path>
   </song>
 </playlist>
 ```
