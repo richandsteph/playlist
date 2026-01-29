@@ -45,7 +45,7 @@
 #
 #
 #   TO-DO:
-#         1) determine 'bitrate' for .mkv song files / write 'track' to .mkv song files
+#         1) determine 'bitrate' for .mkv song files
 #
 #**********************************************************************************************************
 
