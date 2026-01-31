@@ -3,16 +3,18 @@
 #**********************************************************************************************************
 # File: Template_Tk.pl
 # Desc: Perl script template that builds a Tk window with 2 function buttons and an 'Exit' button
-#       - Includes logging and window prompt functions
-#       - Includes a search box for a directory or file, but populates that search box if an argument is passed to Perl script
+#       - Includes logging (global & per function) and window prompt functions
+#       - Includes a search box for a directory or file, populates search box if an argument is passed to 
+#         Perl script
 #
-#       **directory currently assumed, if passing file check functions for use of $dirName THROUGHOUT and modify with $fileName
+# Usage:  perl C:\git_playlist\Template_Tk.pl [PLAYLIST_XML_FILE](optional)
 #
 #	Author: Richard Davis
-#	  	rich@richandsteph.com
+#         rich@richandsteph.com
 #
 #**********************************************************************************************************
-# version 1.0  -  30 Jan 2026  RAD  initial creation
+#
+# Version 1.0  -  31 Jan 2026  RAD  initial creation
 #
 #
 #   TO-DO:
@@ -69,39 +71,44 @@ my $Sep = "-" x 110;
 my $SEP = "=" x 110;
 my $proc = 'Waiting on command...';
 my $progNm = progNm();
-my ( $dirName, $fileName, $log, $stat );
+my ( $dirName, $fileName, $filePath, $log, $stat );
+#log file handles for function log vs. main log
+my ( $funcLogFH, $logFH );
+my $FS = '\\';
 
 #process variables
-$dirName = '';
-$fileName = '';
 if ( $ARGV[0] ) {
-	$fileName = $ARGV[0];
-	( undef, $dirName ) = fileparse( abspathL ( $fileName ) );
+	$filePath = $ARGV[0];
+	#directory separator default for Windows command line
+	$filePath =~ s#[\/\\]#$FS#g;
+	( $fileName, $dirName ) = fileparse( abspathL ( $filePath ) );
+	if ( ! testL ( 'd', $dirName ) ) {
+		$dirName = getcwdL();
+	}
+	$filePath = "$dirName$fileName";
 }
-#directory separator default for Windows command line
-my $FS = '\\';
-$fileName =~ s#[\/\\]#$FS#g;
 
-#create initial window and pass to tk caller
+#create initial window and pass to tk caller, start overall logging
+startLog();
 my $M->{'window'} = MainWindow->new();
 tkMainWindow();
 MainLoop;
 
-#-------------------------------------------------------------
+#----------------------------------------------------------------------------------------------------------
 # read directory and build a list of XML files
 sub getFiles
-#-------------------------------------------------------------
+#----------------------------------------------------------------------------------------------------------
 {
 	my ( @fileFolder, @files );
 
 	updStatus( undef, 'Building list of files...' );
 
-	opendir DIR, $dirName or badExit( "Could not open directory\n looking in <$dirName>" );
+	opendir DIR, $dirName or badExit( undef, "Could not open directory\n looking in <$dirName>" );
 		@fileFolder = readdir DIR;
 	closedir DIR;
 	@files = grep m/\.xml$/i, @fileFolder;
 	unless ( scalar( @files ) ) {
-		badExit( "No files were found in directory\n looking in <$dirName>" );
+		badExit( undef, "No files were found in directory\n looking in <$dirName>" );
 	}
 	
 	#change to working directory
@@ -110,87 +117,144 @@ sub getFiles
 	return( @files );
 }
 
-#-------------------------------------------------------------
+#----------------------------------------------------------------------------------------------------------
 # run process on all files passed in array
 sub mainProcess
-#-------------------------------------------------------------
+#----------------------------------------------------------------------------------------------------------
 {
 	my ( @files ) = @_;
+
+	#determine if called by tkStart1 or tkStart2
+	my ( $package, $file, $line, $subname ) = caller( 1 );
+	$subname =~ s#main::##i;
+	my $funcName;
+	if ( $subname =~ m#^tkStart1$#i ) {
+		$funcName = 'Function1';
+	} elsif ( $subname =~ m#^tkStart2$#i ) {
+		$funcName = 'Function2';
+	} else {
+		undef $funcName;
+	}
 
 	#loop through each file
 	foreach ( @files ) {
 		updStatus( undef, "Processing...$_" );
-		toLog( "\nBegin Processing...$_\n" );
-#-x-		$fileName = "$dirName$FS$_";
+		toLog( $funcName, "\nBegin Processing...$_\n" );
 		my $command;
 
-		toLog( "\n\tRunning $command\n\n" );
+		toLog( $funcName, "\n\tRunning $command\n\n" );
 		updStatus( "Starting $progNm process", undef );
 
 		my $status = 0;
 
 		#if encountered warnings or errors
 		if ( $status == 2 ) {
-			badExit( "Process failed\n\tPlease verify log at $log" );
+			badExit( $funcName, "Process failed\n\tPlease verify log at $log" );
 		} elsif ( $status == 1 ) {
 			my $ans = promptUser( 'warning', "Process generated Warnings,\n\tverify log at <$log>,\n do you want to continue?", 'Yes', 'No' );
 			if ( $ans =~ m#No# ) {
-				badExit( "User chose to stop process,\n Warnings generated in\n <$log>" );
+				badExit( $funcName, "User chose to stop process,\n Warnings generated in\n <$log>" );
 			}
-			toLog( "\n**WARNING: Process generated Warnings,\n    verify log at <$log>\n\n" );
+			toLog( $funcName, "\n**WARNING: Process generated Warnings,\n    verify log at <$log>\n\n" );
 		}
 
-		toLog( "\nFinished Processing\n\n" );
+		toLog( $funcName, "\nFinished Processing\n\n" );
 	}
 }
 
-#-------------------------------------------------------------
+#----------------------------------------------------------------------------------------------------------
+#start logging to file, if no arg then set as main program log otherwise set to passed arg function name
 sub startLog
-#-------------------------------------------------------------
+#----------------------------------------------------------------------------------------------------------
 {
+  my ( $funcName ) = @_;
+
 	my $now = dateTime();
 	my $timeSt = $now->{'date'} . " at " . $now->{'time'};
-	$log = "$dirName$FS$progNm.log";
 
-	open LOG, ">$log" or badExit( "Not able to create log file\n creating in <$log>" );
-	#redirect STDERR to log file
-	open STDERR, ">>$log";
-	my $oldfh = select LOG; $| = 1; select $oldfh;
-	toLog( "$SEP\nTool: $progNm\n\tVersion: $Version\n\n\tDate: $timeSt\n$Sep" );
+	if ( $funcName ) {
+		if ( testL ( 'd', $dirName ) ) {
+	    $log = "$dirName$funcName.log";
+		} else {
+	  	my $dir = getcwdL();
+	    $log = "$dir$FS$progNm.log";
+		}
+		openL ( \$funcLogFH, '>:encoding(UTF-8)', $log ) or badExit( $funcName, "Not able to create log file\n creating in <$log>" );
+		#redirect STDERR to log file
+		open STDERR, ">>$log";
+		my $oldfh = select $funcLogFH; $| = 1; select $oldfh;
+
+		toLog( $funcName, "$Sep\nFunction: $funcName\n\tDate: $timeSt\n$Sep" );
+	} else {
+    if ( testL ( 'd', $dirName ) ) {
+	    $log = "$dirName$progNm.log";
+	  } else {
+	  	my $dir = getcwdL();
+	    $log = "$dir$FS$progNm.log";
+	  }
+		openL ( \$logFH, '>:encoding(UTF-8)', $log ) or badExit( undef, "Not able to create log file\n creating in <$log>" );
+		#redirect STDERR to log file
+		open STDERR, ">>$log";
+		my $oldfh = select $logFH; $| = 1; select $oldfh;
+
+		toLog( undef, "$SEP\nTool: $progNm\n\tVersion: $Version\n\n\tDate: $timeSt\n$Sep" );
+	}
 }
 
-#-------------------------------------------------------------
+#----------------------------------------------------------------------------------------------------------
 #write to log file
 sub toLog
-#-------------------------------------------------------------
+#----------------------------------------------------------------------------------------------------------
 {
-	my ( $msg ) = @_;
+	my ( $funcName, $msg ) = @_;
 
-	if ( fileno LOG ) {
-		print LOG $msg;
+	if ( $funcName ) {
+		if ( fileno( $funcLogFH ) ) {
+			print $funcLogFH $msg;
+		} else {
+			#log file is not open, write to error window
+			my ( $package, $file, $line, $subname ) = caller( 1 );
+			$subname =~ s#main::##;
+			unless ( $subname =~ m#badExit#i ) {
+				badExit( $funcName, "$msg" );
+			}
+		}
 	} else {
-		#log file is not open, write to error window
-		my ( $package, $file, $line, $subname ) = caller( 1 );
-		$subname =~ s#main::##;
-		unless ( $subname =~ m#badExit#i ) {
-			badExit( "$msg" );
+		if ( fileno( $logFH ) ) {
+			print $logFH $msg;
+		} else {
+			#log file is not open, write to error window
+			my ( $package, $file, $line, $subname ) = caller( 1 );
+			$subname =~ s#main::##;
+			unless ( $subname =~ m#badExit#i ) {
+				badExit( undef, "$msg" );
+			}
 		}
 	}
 }
 
-#-------------------------------------------------------------
+#----------------------------------------------------------------------------------------------------------
 sub endLog
-#-------------------------------------------------------------
+#----------------------------------------------------------------------------------------------------------
 {
-	if ( fileno LOG ) {
-		toLog( "$progNm Process Completed\n$SEP\n\n" );
+  my ( $funcName ) = @_;
+
+	my $now = dateTime();
+	my $timeSt = $now->{'date'} . " at " . $now->{'time'};
+
+	if ( ( $funcName ) && ( fileno( $funcLogFH ) ) ) {
+		toLog( $funcName, "$funcName Process Completed\n$SEP\n\n" );
+		close $funcLogFH;
+	} elsif ( fileno( $logFH ) ) {
+    toLog( undef, "$SEP\nTool: $progNm\n\tVersion: $Version\n\n\tDate: $timeSt\n$Sep" );
+		toLog( undef, "$progNm Process Completed\n$SEP\n\n" );
+		close $logFH;
 	}
-	close LOG;
 }
 
-#-------------------------------------------------------------
+#----------------------------------------------------------------------------------------------------------
 sub tkMainWindow
-#-------------------------------------------------------------
+#----------------------------------------------------------------------------------------------------------
 {
 	#main window
 	$M->{'window'}->configure( -bg=>TK_COLOR_BG, -fg=>TK_COLOR_FG, -title=>"$progNm..." );
@@ -219,8 +283,8 @@ sub tkMainWindow
 	
 	#directory or file choose frame:
 	#   change the -text value to 'File:' for files
-	#   change the -textvariable value to /$fileName for files
-	#   change the -command value to '[/&tkGetFile, $fileName]' for files
+	#   change the -textvariable value to \$filePath for files
+	#   change the -command value to '[\&tkGetFile, $filePath]' for files
 	$choose->Label(
 		-text=>'File:',
 		-font=>TK_FNT_BIGB,
@@ -228,7 +292,7 @@ sub tkMainWindow
 		-fg=>TK_COLOR_FG
 	)->pack( -side=>'left' );
 	my $entry = $choose->Entry(
-		-textvariable=>\$fileName,
+		-textvariable=>\$filePath,
 		-width=>'30',
 		-bg=>TK_COLOR_FIELD,
 		-fg=>TK_COLOR_FG
@@ -236,7 +300,7 @@ sub tkMainWindow
 	$entry->xview( 'end' );
 	$M->{'select'} = $choose->Button(
 		-text => "...",
-		-command => [ \&tkGetFile, $fileName ],
+		-command => [ \&tkGetFile, $filePath ],
 		-bg => TK_COLOR_BG,
 		-fg => TK_COLOR_FG,
 		-activebackground=>TK_COLOR_ABG,
@@ -301,10 +365,10 @@ sub tkMainWindow
 	}
 }
 
-#-------------------------------------------------------------
+#----------------------------------------------------------------------------------------------------------
 #update status in window, 1st arg is current status and 2nd arg is current process
 sub updStatus
-#-------------------------------------------------------------
+#----------------------------------------------------------------------------------------------------------
 {
 	if ( $_[0] ) { $stat = $_[0] };
 	if ( $_[1] ) { $proc = $_[1] };
@@ -312,14 +376,14 @@ sub updStatus
 	$M->{'window'}->update();
 }
 
-#-------------------------------------------------------------
+#----------------------------------------------------------------------------------------------------------
 #creates prompt window
 #  -returns user's response (name of button)
 #  -if 1st arg specified as 'warning' or 'error', will display that image and include in window title
 #  -3rd arg, and so forth, create buttons
 #  -3rd arg button has default focus
 sub promptUser
-#-------------------------------------------------------------
+#----------------------------------------------------------------------------------------------------------
 {
 	my ( $type, $txt, @buttons ) = @_;
 	my $image = '';
@@ -362,57 +426,68 @@ sub promptUser
 	return( $ans );
 }
 
-#-------------------------------------------------------------
+#----------------------------------------------------------------------------------------------------------
 #user chooses directory
 sub tkGetDir
-#-------------------------------------------------------------
+#----------------------------------------------------------------------------------------------------------
 {
 	my ( $filePath ) = @_;
+	my $dir;
+
+	if ( testL ( 'e', $filePath ) ) {
+		( undef, $dir ) = fileparse( abspathL ( $filePath ) );
+	}
 
 	$filePath = $M->{'window'}->chooseDirectory(
-		-initialdir=>$filePath,
+		-initialdir=>$dir,
 		-title=>'Choose Directory...'
 	);
 
-	if ( testL( 'e', $filePath ) ) {
-		$dirName = $filePath;
+	if ( $dir ) {
+		$dirName = $dir;
 	}
 }
 
-#-------------------------------------------------------------
+#----------------------------------------------------------------------------------------------------------
 #user chooses file
 sub tkGetFile
-#-------------------------------------------------------------
+#----------------------------------------------------------------------------------------------------------
 {
-	my ( $filePath ) = @_;
-	my ( $dir, $file );
+	my ( $getFilePath ) = @_;
 
-	if ( testL( 'e', $filePath ) ) {
-		( $file, $dir ) = fileparse( abspathL ( $filePath ) );
+	my ( $dir, $file );
+	if ( $getFilePath ) {
+		( $file, $dir ) = fileparse( abspathL ( $getFilePath ) );
 	}
 
-	$filePath = $M->{'window'}->getOpenFile(
+	$getFilePath = $M->{'window'}->getOpenFile(
 		-initialdir=>$dir,
 		-initialfile=>$file,
 		-title=>'Choose File...'
 	);
 
-	if ( testL( 'e', $filePath ) ) {
-		$fileName = $filePath;
+	if ( $getFilePath ) {
+		$filePath = $getFilePath;
+		if ( $dir && $file ) {
+			$fileName = $file;
+			$dirName = $dir;
+		} else {
+			( $fileName, $dirName ) = fileparse( abspathL ( $filePath ) );
+		}
 	}
 }
 
-#-------------------------------------------------------------
+#----------------------------------------------------------------------------------------------------------
 #first function
 sub tkStart1
-#-------------------------------------------------------------
+#----------------------------------------------------------------------------------------------------------
 {
 	#must specify directory
 	unless ( $fileName )
 	{
 		my $ans = promptUser( 'warning', "No file selected,\n do you want to continue?", 'Yes', 'No' );
 		if ( $ans =~ m#No# ) {
-			badExit( "User chose to stop process,\n no file selected or passed" );
+			badExit( 'Function1', "User chose to stop process,\n no file selected or passed" );
 		}
 		$M->{'select'}->focus();
 		return;
@@ -421,29 +496,29 @@ sub tkStart1
 	#change buttons to indicate process started
 	$M->{'func1'}->configure(
 		-text=>'Running...',
+		-font=>TK_FNT_B,
 		-state=>'disabled',
 		-fg=>TK_COLOR_GREYBUT,
 		-bg=>TK_COLOR_FIELD,
 		-activebackground=>TK_COLOR_FIELD
 	);
 	$M->{'func2'}->configure(
-		-text=>'Function 2',
+		-text=>'Function2',
 		-font=>TK_FNT_BI,
 		-state=>'disabled',
 		-fg=>TK_COLOR_GREYBUT,
 		-bg=>TK_COLOR_BG,
 		-activebackground=>TK_COLOR_BG,
-		-disabledforeground=>TK_COLOR_GREYBUT
 	);
 	$M->{'exit'}->focus();
 
 	#starting log process
-	startLog();
+	startLog( 'Function1' );
 	
-	#get list of files and change to directory, if $fileName not passed in perl arg
+	#get list of files and change to directory, if $filePath not passed in perl arg
 	my @files;
-	if ( testL( 'e', $fileName ) ) {
-    push( @files, $fileName );
+	if ( testL ( 'e', $filePath ) ) {
+    push( @files, $filePath );
   } else {
 		@files = getFiles();
 	}
@@ -454,20 +529,20 @@ sub tkStart1
 	my $folderNm;
 	( $folderNm ) = fileparse( abspathL ( $dirName ) );
 	updStatus( "Finished processing \"" . $folderNm . "\"" );
-	tkEnd();
+	tkEnd( 'Function1' );
 }
 
-#-------------------------------------------------------------
+#----------------------------------------------------------------------------------------------------------
 #second function
 sub tkStart2
-#-------------------------------------------------------------
+#----------------------------------------------------------------------------------------------------------
 {
 	#must specify directory
 	unless ( $fileName )
 	{
 		my $ans = promptUser( 'warning', "No file selected,\n do you want to continue?", 'Yes', 'No' );
 		if ( $ans =~ m#No# ) {
-			badExit( "User chose to stop process,\n no file selected or passed" );
+			badExit( 'Function2', "User chose to stop process,\n no file selected or passed" );
 		}
 		$M->{'select'}->focus();
 
@@ -476,18 +551,17 @@ sub tkStart2
 
 	#change buttons to indicate process started
 	$M->{'func1'}->configure(
-		-text=>'Function 1',
+		-text=>'Function1',
 		-font=>TK_FNT_BI,
 		-state=>'disabled',
 		-fg=>TK_COLOR_GREYBUT,
 		-bg=>TK_COLOR_BG,
 		-activebackground=>TK_COLOR_BG,
-		-disabledforeground=>TK_COLOR_GREYBUT
 	);
 	$M->{'func2'}->configure(
 		-text=>'Running...',
-		-state=>'disabled',
 		-font=>TK_FNT_B,
+		-state=>'disabled',
 		-fg=>TK_COLOR_GREYBUT,
 		-bg=>TK_COLOR_FIELD,
 		-activebackground=>TK_COLOR_FIELD
@@ -495,12 +569,12 @@ sub tkStart2
 	$M->{'exit'}->focus();
 
 	#starting log process
-	startLog();
+	startLog( 'Function2' );
 	
-	#get list of files and change to directory, if $fileName not passed in perl arg
+	#get list of files and change to directory, if $filePath not passed in perl arg
 	my @files;
-	if ( testL( 'e', $fileName ) ) {
-    push( @files, $fileName );
+	if ( testL ( 'e', $filePath ) ) {
+    push( @files, $filePath );
   } else {
 		@files = getFiles();
 	}
@@ -511,17 +585,20 @@ sub tkStart2
 	my $folderNm;
 	( $folderNm ) = fileparse( abspathL ( $dirName ) );
 	updStatus( "Finished processing \"" . $folderNm . "\"" );
-	tkEnd();
+	tkEnd( 'Function2' );
 }
 
-#-------------------------------------------------------------
+#----------------------------------------------------------------------------------------------------------
 # function 1 or function 2 ends successfully - log closed and window refreshed for restart
 sub tkEnd
-#-------------------------------------------------------------
+#----------------------------------------------------------------------------------------------------------
 {
+	my ( $funcName ) = @_;
+
 	#close log file
-	endLog();
+	endLog( $funcName );
 	undef $log;
+  $log = "$dirName$FS$progNm.log";
 
 	#focus on exit button and reset status
 	$proc = 'Waiting on command...';
@@ -548,10 +625,10 @@ sub tkEnd
 	$M->{'window'}->update();
 }
 
-#-------------------------------------------------------------
+#----------------------------------------------------------------------------------------------------------
 # program exits
 sub tkExit
-#-------------------------------------------------------------
+#----------------------------------------------------------------------------------------------------------
 {
 	#close log file
 	endLog();
@@ -560,9 +637,9 @@ sub tkExit
 	exit( 0 );
 }
 
-#-------------------------------------------------------------
+#----------------------------------------------------------------------------------------------------------
 sub dateTime
-#-------------------------------------------------------------
+#----------------------------------------------------------------------------------------------------------
 {
 	my ( $sec, $min, $hr, $day, $monNum, $yr );
 	my $tod = 'am';
@@ -577,6 +654,8 @@ sub dateTime
 	if ( $hr > 12 ) {
 		$hr = $hr - 12;
 		$tod = 'pm';
+	} elsif ( $hr == 12 ) {
+		$tod = 'pm';
 	}
 	$yr = 1900 + $yr;
 
@@ -587,10 +666,10 @@ sub dateTime
 	return( $now );		
 }
 
-#-------------------------------------------------------------
+#----------------------------------------------------------------------------------------------------------
 #return the name of the program currently running
 sub progNm
-#-------------------------------------------------------------
+#----------------------------------------------------------------------------------------------------------
 {
 	my $prog;
 
@@ -603,12 +682,12 @@ sub progNm
 	return( $prog );
 }
 
-#-------------------------------------------------------------
+#----------------------------------------------------------------------------------------------------------
 #error in process, write out error to log and/or window and exit
 sub badExit
-#-------------------------------------------------------------
+#----------------------------------------------------------------------------------------------------------
 {
-	my ( $error ) = @_;
+	my ( $funcName, $error ) = @_;
 
 	#store any returned system error info
 	if ( $! or $@ ) {
@@ -616,14 +695,20 @@ sub badExit
 	}
 	updStatus( undef, 'ERROR...' );
 
-	if ( fileno LOG ) {
-		toLog( " **ERROR: $error\n" );
+	if ( fileno( $funcLogFH ) ) {
+		toLog( $funcName, " **ERROR: $error\n" );
+	}
+	if ( fileno( $logFH ) ) {
+		toLog( undef, " **ERROR: $error\n" );
 	}
 
 	promptUser( 'error', $error );
 
-	#close log if open
-	if ( fileno LOG ) {
+	#close logs if open
+	if ( ( $funcName ) && ( fileno( $funcLogFH ) ) ) {
+		endLog( $funcName );
+	}
+	if ( fileno( $logFH ) ) {
 		endLog();
 	}
 
