@@ -10,7 +10,7 @@
 # Usage:  perl C:\git_playlist\update_ID3_tags.pl [PLAYLIST_XML_FILE]
 #
 #	Author: Richard Davis
-#	  	rich@richandsteph.com
+#         rich@richandsteph.com
 #
 #**********************************************************************************************************
 # version 1.0  -  19 Jan 2026	RAD	initial creation
