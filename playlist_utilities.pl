@@ -18,15 +18,25 @@
 #
 #**********************************************************************************************************
 #
-# Version 1.0  -  31 Jan 2026	 RAD initial creation
+# Version 1.0 - 31 Jan 2026	 RAD initial creation
+#         1.1 -  1 Feb 2026	 RAD incorporated 'update_ID3_tags' script into function subroutine (replacing 
+#                                  tkStart1), changed Tk font to 'Lucida Sans Unicode', changed Warning 
+#                                  count to hash of warnings per function & global overall count when 
+#                                  logging warnings, standardized error & warning message format, cleaned 
+#                                  up some code formatting, changed test for selection (or passing) of 
+#                                  file/directory to $filePath in function subroutines, added clean-up of 
+#                                  warning within function subroutine to return to MainLoop, changed 
+#                                  handling of warning/badExit messages to decode raw message into Unicode 
+#                                  characters, removed $FS when using $dirName (which ends in backslash), 
+#                                  added some log formatting
 #
 #
 #   TO-DO:
-#         1) create functions to do items in Desc, modifying tkStart1 & tkStart2
+#         1) create functions to do items in Desc, modifying tkStart2
 #
 #**********************************************************************************************************
 
-my $Version = "1.0";
+my $Version = "1.1";
 
 use strict;
 use warnings;
@@ -35,7 +45,9 @@ use feature 'unicode_strings';
 use open ':std', IO => ':raw :encoding(UTF-8)';
 
 use Carp qw( carp croak longmess shortmess );
+use Config;
 use Data::Dumper qw( Dumper );
+use Encode qw( decode );
 use File::Basename qw( fileparse );
 #uncomment line below to specify config file for ExifTool
 #BEGIN { $Image::ExifTool::configFile = 'C:\Users\rich\.ExifTool_config' }
@@ -59,12 +71,12 @@ use constant TK_COLOR_LGREEN	=> 'palegreen';
 use constant TK_COLOR_GREYBUT	=> 'gray54';
 use constant TK_COLOR_LRED		=> 'tomato';
 #font using Unix-centric font name:-foundry-family-weight-slant-setwidth-addstyle-pixel-point-resx-resy-spacing-width-charset-encoding, "*" defaults and last "*" defaults remaining values
-use constant TK_FNT_BIGGER		=> "-*-lucida-bold-r-normal-*-18-*";
-use constant TK_FNT_BIGB		=> "-*-lucida-bold-r-normal-*-14-*";
-use constant TK_FNT_BIG			=> "-*-lucida-medium-r-normal-*-14-*";
-use constant TK_FNT_BI			=> "-*-lucida-bold-i-normal-*-12-*";
-use constant TK_FNT_B			=> "-*-lucida-bold-r-normal-*-12-*";
-use constant TK_FNT_I			=> "-*-lucida-medium-i-normal-*-12-*";
+use constant TK_FNT_BIGGER		=> "-*-{Lucida Sans Unicode}-bold-r-normal-*-18-*";
+use constant TK_FNT_BIGB		=> "-*-{Lucida Sans Unicode}-bold-r-normal-*-14-*";
+use constant TK_FNT_BIG			=> "-*-{Lucida Sans Unicode}-medium-r-normal-*-14-*";
+use constant TK_FNT_BI			=> "-*-{Lucida Sans Unicode}-bold-i-normal-*-12-*";
+use constant TK_FNT_B			=> "-*-{Lucida Sans Unicode}-bold-r-normal-*-12-*";
+use constant TK_FNT_I			=> "-*-{Lucida Sans Unicode}-medium-i-normal-*-12-*";
 
 umask 000;
 
@@ -77,8 +89,8 @@ my ( $dirName, $fileName, $filePath, $log, $stat );
 my ( $funcLogFH, $logFH );
 #determine program name
 my $progName = progName();
-#set warning count
-my $warnCnt = 0;
+#set warning hash
+my %warn;
 
 #command-line tools for song metadata manipulation
 my $exifToolCmd = 'C:\Strawberry\perl\site\bin\exiftool';
@@ -232,12 +244,12 @@ sub getFiles
 
 	updStatus( undef, 'Building list of files...' );
 
-	opendir DIR, $dirName or badExit( undef, "Could not open directory\n looking in <$dirName>" );
+	opendir DIR, $dirName or badExit( undef, "Could not open directory\n looking in: '$dirName'" );
 		@fileFolder = readdir DIR;
 	closedir DIR;
 	@files = grep m/\.xml$/i, @fileFolder;
 	unless ( scalar( @files ) ) {
-		badExit( undef, "No files were found in directory\n looking in <$dirName>" );
+		badExit( undef, "No files were found in directory\n looking in: '$dirName'" );
 	}
 	
 	#change to working directory
@@ -306,10 +318,10 @@ sub tkMainWindow
 	$M->{'progress'}= $statframe->Label( -bg=>TK_COLOR_FIELD, -textvariable=>\$stat )->pack( -side=>'left', -fill=>'x' );
 
 	#buttons frame
-	$M->{'func1'} = $buttons->Button(
-		-text=>'Function 1',
+	$M->{'update'} = $buttons->Button(
+		-text=>'Update ID3 Tags',
 		-font=>TK_FNT_B,
-		-command=>\&tkStart1,
+		-command=>\&update_ID3_tags,
 		-borderwidth=>'4',
 		-bg=>TK_COLOR_BG,
 		-fg=>TK_COLOR_FG,
@@ -353,7 +365,7 @@ sub tkMainWindow
 	
 	#set focus
 	if ( $dirName ) {
-		$M->{'func1'}->focus();
+		$M->{'update'}->focus();
 	} else {
 		$M->{'select'}->focus();
 	}
@@ -384,7 +396,7 @@ sub promptUser
 	my $title = '';
 
 	if ( $type ) {
-		if ( $type =~ m#( error|warning )#i ) {
+		if ( $type =~ m#(error|warning)#i ) {
       $title = uc($type);
     } else {
       $image = lc($type);
@@ -472,69 +484,15 @@ sub tkGetFile
 }
 
 #----------------------------------------------------------------------------------------------------------
-#first function
-sub tkStart1
-#----------------------------------------------------------------------------------------------------------
-{
-	#must specify directory
-	unless ( $fileName )
-	{
-		my $ans = promptUser( 'warning', "No file selected,\n do you want to continue?", 'Yes', 'No' );
-		if ( $ans =~ m#No# ) {
-			badExit( 'Function1', "User chose to stop process,\n no file selected or passed" );
-		}
-		$M->{'select'}->focus();
-		return;
-	}
-
-	#change buttons to indicate process started
-	$M->{'func1'}->configure(
-		-text=>'Running...',
-		-font=>TK_FNT_B,
-		-state=>'disabled',
-		-fg=>TK_COLOR_GREYBUT,
-		-bg=>TK_COLOR_FIELD,
-		-activebackground=>TK_COLOR_FIELD
-	);
-	$M->{'func2'}->configure(
-		-text=>'Function2',
-		-font=>TK_FNT_BI,
-		-state=>'disabled',
-		-fg=>TK_COLOR_GREYBUT,
-		-bg=>TK_COLOR_BG,
-		-activebackground=>TK_COLOR_BG,
-	);
-	$M->{'exit'}->focus();
-
-	#starting log process
-	startLog( 'Function1' );
-	
-	#get list of files and change to directory, if $filePath not passed in perl arg
-	my @files;
-	if ( testL ( 'e', $filePath ) ) {
-    push( @files, $filePath );
-  } else {
-		@files = getFiles();
-	}
-
-	#process ended
-	my $folderNm;
-	( $folderNm ) = fileparse( abspathL ( $dirName ) );
-	updStatus( "Finished processing \"" . $folderNm . "\"" );
-	tkEnd( 'Function1' );
-}
-
-#----------------------------------------------------------------------------------------------------------
 #second function
 sub tkStart2
 #----------------------------------------------------------------------------------------------------------
 {
-	#must specify directory
-	unless ( $fileName )
-	{
-		my $ans = promptUser( 'warning', "No file selected,\n do you want to continue?", 'Yes', 'No' );
+	#must specify file or directory
+	unless ( $filePath ) {
+		my $ans = promptUser( 'warning', "No file (or directory) selected or passed,\n do you want to continue?", 'Yes', 'No' );
 		if ( $ans =~ m#No# ) {
-			badExit( 'Function2', "User chose to stop process,\n no file selected or passed" );
+			badExit( 'Function2', "User chose to stop process,\n no file (or directory) selected or passed" );
 		}
 		$M->{'select'}->focus();
 
@@ -542,8 +500,8 @@ sub tkStart2
 	}
 
 	#change buttons to indicate process started
-	$M->{'func1'}->configure(
-		-text=>'Function1',
+	$M->{'update'}->configure(
+		-text=>'update_ID3_tags',
 		-font=>TK_FNT_BI,
 		-state=>'disabled',
 		-fg=>TK_COLOR_GREYBUT,
@@ -563,14 +521,6 @@ sub tkStart2
 	#starting log process
 	startLog( 'Function2' );
 	
-	#get list of files and change to directory, if $filePath not passed in perl arg
-	my @files;
-	if ( testL ( 'e', $filePath ) ) {
-    push( @files, $filePath );
-  } else {
-		@files = getFiles();
-	}
-
 	#process ended
 	my $folderNm;
 	( $folderNm ) = fileparse( abspathL ( $dirName ) );
@@ -583,6 +533,38 @@ sub tkStart2
 sub update_ID3_tags
 #----------------------------------------------------------------------------------------------------------
 {
+	#must specify file or directory
+	unless ( $filePath ) {
+		my $ans = promptUser( 'warning', "No file (or directory) selected or passed,\n do you want to continue?", 'Yes', 'No' );
+		if ( $ans =~ m#No# ) {
+			badExit( 'update_ID3_tags', "User chose to stop process,\n no file (or directory) selected or passed" );
+		}
+		$M->{'select'}->focus();
+		return;
+	}
+
+	#change buttons to indicate process started
+	$M->{'update'}->configure(
+		-text=>'Updating...',
+		-font=>TK_FNT_B,
+		-state=>'disabled',
+		-fg=>TK_COLOR_GREYBUT,
+		-bg=>TK_COLOR_FIELD,
+		-activebackground=>TK_COLOR_FIELD
+	);
+	$M->{'func2'}->configure(
+		-text=>'Function2',
+		-font=>TK_FNT_BI,
+		-state=>'disabled',
+		-fg=>TK_COLOR_GREYBUT,
+		-bg=>TK_COLOR_BG,
+		-activebackground=>TK_COLOR_BG,
+	);
+	$M->{'exit'}->focus();
+
+	#starting log process
+	startLog( 'update_ID3_tags' );
+	
 	#separate out playlist XML filename and directory
 	my ( $playlistFilename, $playlistFilePath ) = fileparse( abspathL ( $filePath ) );
 	$playlistFilename =~ s#\.\w\w\w?$##;
@@ -643,8 +625,10 @@ sub update_ID3_tags
 					print "     - processing song no. " . $num . ": '" . $songFileName . "'\n";
 				} else {
 					binmode( STDOUT, ":encoding(UTF-8)" );
-					print "   Song no. " . $num . " : '" . $songFileName . "' does not exist\n";
+					print "    Song no. " . $num . " : '" . $songFileName . "' does not exist\n";
 					warning( 'update_ID3_tags', "Song no. " . $num . " : '" . $songFile . "' does not exist" );
+					tkEnd( 'update_ID3_tags' );
+					return();
 				}
 			} elsif ( $nodeName =~ m#^track$# ) {
 				$tags{$nodeName} = $nodeContent if ( $nodeContent );
@@ -707,7 +691,13 @@ sub update_ID3_tags
 	print $xmlOutFH $writer or badExit( 'update_ID3_tags', "Not able to write out XML to '$playlistFilename.xml'" );
 	close( $xmlOutFH );
 	toLog( 'update_ID3_tags', "\n...Created playlist XML file: '$filePath'\n\n" );
-	toLog( 'update_ID3_tags', " *WARNING*: There were " . $warnCnt . " warning(s) for process...\n\n\n" ) if ( $warnCnt );
+	toLog( 'update_ID3_tags', " *WARNING*: There were " . $warn{update_ID3_tags} . " warning(s) for process...\n\n\n" ) if ( $warn{update_ID3_tags} );
+
+	#process ended
+	my $folderNm;
+	( $folderNm ) = fileparse( abspathL ( $dirName ) );
+	updStatus( "Finished processing \"" . $folderNm . "\"" );
+	tkEnd( 'update_ID3_tags' );
 }
 
 #----------------------------------------------------------------------------------------------------------
@@ -734,16 +724,17 @@ sub mkvTools
 	my $mkvBatFH;
 	#open/close batch file with commands written to it
 	toLog( 'update_ID3_tags', "   - Creating batch file wrapper for 'mkvextract': '" . $mkvBat . "'\n" );
-	openL ( \$mkvBatFH, '>:encoding(UTF-8)', $mkvBat ) or badExit( 'update_ID3_tags', "Not able to create temporary batch file to run 'mkvextract': $^E, $!" );
+	openL ( \$mkvBatFH, '>:encoding(UTF-8)', $mkvBat ) or badExit( 'update_ID3_tags', "Not able to create temporary batch file to run 'mkvextract': '" . $mkvBat . "'" );
 		my $oldFH = select $mkvBatFH; $| = 1; select $oldFH;
 		print $mkvBatFH "\n" . 'chcp 65001' . "\n" . 'call ' . join( " ", @mkvArgs );
 	close( $mkvBatFH );
 
 	#execute batch file wrapper to call 'mkvextract' command batch file
 	toLog( 'update_ID3_tags', "   - Executing batch file for 'mkvextract'\n" );
-	my $stdOutErr;
-	run3( $mkvBat, \undef, \$stdOutErr, \$stdOutErr );
-	badExit( 'update_ID3_tags', "Not able to run 'mkvextract' batch file wrapper: '" . $mkvBat . "', returned: " . $? . ", and: " . $stdOutErr ) if ( $? );
+	my ( $rawStdOutErr, $stdOutErr );
+	run3( $mkvBat, \undef, \$rawStdOutErr, \$rawStdOutErr );
+	$stdOutErr = decode( $Config{enc_to_system} || 'UTF-8', $rawStdOutErr );
+	badExit( 'update_ID3_tags', "Not able to run 'mkvextract', returned:\n" . $stdOutErr ) if ( $? || $stdOutErr);
 
 	#load XML data
 	my $xmlFH;
@@ -764,8 +755,13 @@ sub mkvTools
 
 	toLog( 'update_ID3_tags', "   - Cleaning up temporary 'mkvextract' files\n" );
 	if ( testL ( 'e', $songFileXml ) ) {
-		unlinkL ( $mkvBat ) or warning( 'update_ID3_tags', "Not able to remove temporary 'mkvextract' batch file: '" . $mkvBat . "': $^E, $!" );
-		unlinkL ( $songFileXml ) or warning( 'update_ID3_tags', "Not able to remove XML data for song file: '" . $songFileXml . "': $^E, $!" );
+		my $unlinkErr;
+		my $fileDel = unlinkL ( $mkvBat );
+		$unlinkErr = decode( $Config{enc_to_system} || 'UTF-8', $^E );
+		warning( 'update_ID3_tags', "Not able to remove temporary 'mkvextract' batch file: '" . $mkvBat . "', returned:\n" . $unlinkErr ) if ( ! $fileDel );
+		$fileDel = unlinkL ( $songFileXml );
+		$unlinkErr = decode( $Config{enc_to_system} || 'UTF-8', $^E );
+		warning( 'update_ID3_tags', "Not able to remove XML data for song file: '" . $songFileXml . "', returned:\n" . $unlinkErr ) if ( ! $fileDel );
 	} else {
 		badExit( 'update_ID3_tags', "XML data not created for song file: '" . $songFile . "'" );
 	}
@@ -812,22 +808,23 @@ sub exifTools
 	my ( $jsonBatFH, $jsonFH, $argsFH );
 	#open/close batch file with commands written to it
 	toLog( 'update_ID3_tags', "   - Creating batch file wrapper for 'exiftool': '" . $jsonBat . "'\n" );
-	openL ( \$jsonBatFH, '>:encoding(UTF-8)', $jsonBat ) or badExit( 'update_ID3_tags', "Not able to create temporary batch file to run 'exiftool': $^E, $!" );
+	openL ( \$jsonBatFH, '>:encoding(UTF-8)', $jsonBat ) or badExit( 'update_ID3_tags', "Not able to create temporary batch file to run 'exiftool': '" . $jsonBat . "'" );
 		my $oldFH = select $jsonBatFH; $| = 1; select $oldFH;
 		print $jsonBatFH "\n" . 'chcp 65001' . "\n" . 'call ' . join( " ", @exifToolArgs );
 	close( $jsonBatFH );
 	#open/close 'exiftool' args file with arguments written to it
 	toLog( 'update_ID3_tags', "   - Creating argument file for 'exiftool': '" . $exifToolArgsFile . "'\n" );
-	openL ( \$argsFH, '>:encoding(UTF-8)', $exifToolArgsFile ) or badExit( 'update_ID3_tags', "Not able to create temporary arguments file to run 'exiftool': $^E, $!" );
+	openL ( \$argsFH, '>:encoding(UTF-8)', $exifToolArgsFile ) or badExit( 'update_ID3_tags', "Not able to create temporary arguments file to run 'exiftool': '" . $exifToolArgsFile . "'" );
 		$oldFH = select $argsFH; $| = 1; select $oldFH;
 		print $argsFH @exifToolFileArgs;
 	close( $argsFH );
 
 	#execute batch file wrapper to call 'exiftool' command batch file
 	toLog( 'update_ID3_tags', "   - Executing batch file for 'exiftool'\n" );
-	my ( $songFileJson, $stdOutErr );
-	run3( $jsonBat, \undef, \$songFileJson, \$stdOutErr );
-	badExit( 'update_ID3_tags', "ExifTool is not able to read the metadata of the file, returned: " . $? . ", and: " . $stdOutErr ) if ( $? );
+	my ( $songFileJson, $rawStdErr, $stdErr );
+	run3( $jsonBat, \undef, \$songFileJson, \$rawStdErr );
+	$stdErr = decode( $Config{enc_to_system} || 'UTF-8', $rawStdErr );
+	badExit( 'update_ID3_tags', "ExifTool is not able to read the metadata of the file, returned:\n" . $stdErr ) if ( $? || $stdErr );
 	my $jsonTxt;
 	if ( $songFileJson =~ m#(\n\[\{.+)#s ) {
 		$jsonTxt = $1;
@@ -851,8 +848,13 @@ sub exifTools
 	}
 	toLog( 'update_ID3_tags', "   - Cleaning up temporary 'exiftool' files\n" );
 	if ( testL ( 'e', $jsonBat ) || testL ( 'e', $exifToolArgsFile ) ) {
-		unlinkL ( $jsonBat ) or warning( 'update_ID3_tags', "Not able to remove temporary 'exiftool' batch file: '" . $jsonBat . "': $^E, $!" );
-		unlinkL ( $exifToolArgsFile ) or warning( 'update_ID3_tags', "Not able to remove arguments file for 'exiftool': '" . $exifToolArgsFile . "': $^E, $!" );
+		my $unlinkErr;
+		my $fileDel = unlinkL ( $jsonBat );
+		$unlinkErr = decode( $Config{enc_to_system} || 'UTF-8', $^E );
+		warning( 'update_ID3_tags', "Not able to remove temporary 'exiftool' batch file: '" . $jsonBat . "', returned:\n" . $unlinkErr ) if ( ! $fileDel );
+		$fileDel = unlinkL ( $exifToolArgsFile );
+		$unlinkErr = decode( $Config{enc_to_system} || 'UTF-8', $^E );
+		warning( 'update_ID3_tags', "Not able to remove arguments file for 'exiftool': '" . $exifToolArgsFile . "', returned:\n" . $unlinkErr ) if ( ! $fileDel );
 	}
 }
 
@@ -1093,14 +1095,17 @@ sub extractTags
 		my $ffprobeFH;
 		#open/close batch file with commands written to it
 		toLog( 'update_ID3_tags', "   - Creating 'ffprobe' batch file: '" . $ffprobeBat . "'\n" );
-		openL ( \$ffprobeFH, '>:encoding(UTF-8)', $ffprobeBat ) or badExit( 'update_ID3_tags', "Not able to create temporary batch file to run 'ffprobe': $^E, $!" );
+		openL ( \$ffprobeFH, '>:encoding(UTF-8)', $ffprobeBat ) or badExit( 'update_ID3_tags', "Not able to create temporary batch file to run 'ffprobe': '" . $ffprobeBat . "'" );
 			my $oldfh = select $ffprobeFH; $| = 1; select $oldfh;
 			#write empty line to batch file in case of file header conflict
 			print $ffprobeFH "\n" . 'chcp 65001' . "\n" . 'call ' . join( " ", @ffprobeCmd );
 		close( $ffprobeFH );
 	
 		toLog( 'update_ID3_tags', "   - Executing 'ffprobe' batch file\n" );
-		run3( $ffprobeBat, \undef, \$length );
+		my ( $rawStdErr, $stdErr );
+		run3( $ffprobeBat, \undef, \$length, \$rawStdErr );
+		$stdErr = decode( $Config{enc_to_system} || 'UTF-8', $rawStdErr );
+		warning( 'update_ID3_tags', "Not able to run 'ffprobe', returned:\n" . $stdErr ) if ( $? || $stdErr );
 		if ( $length =~ m#\n(\d+)# ) {
 			$length = $1;
 			my $minutes = $length / 60;
@@ -1117,7 +1122,12 @@ sub extractTags
 	
 		toLog( 'update_ID3_tags', "   - Cleaning up temporary 'ffprobe' files\n" );
 		if ( testL ( 'e', $ffprobeBat ) ) {
-			unlinkL ( $ffprobeBat ) or warning( 'update_ID3_tags', "Not able to remove temporary 'ffprobe' batch file: '" . $ffprobeBat . "': $^E, $!" );
+			my $unlinkErr;
+			my $fileDel = unlinkL ( $ffprobeBat );
+			$unlinkErr = decode( $Config{enc_to_system} || 'UTF-8', $^E );
+			warning( 'update_ID3_tags', "Not able to remove temporary 'ffprobe' batch file: '" . $ffprobeBat . "', returned:\n" . $unlinkErr ) if ( ! $fileDel );
+		} else {
+			warning( 'update_ID3_tags', "'ffprobe' batch file '" . $ffprobeBat . "' does not exist (trying to delete)" );
 		}
 	}
 
@@ -1272,7 +1282,7 @@ sub writeTags
 	my $ffmpegFH;
 	#open/close batch file with commands written to it
 	toLog( 'update_ID3_tags', "   - Creating batch file with 'ffmpeg' commands: '" . $ffmpegBat . "'\n" );
-	openL ( \$ffmpegFH, '>:encoding(UTF-8)', $ffmpegBat ) or badExit( 'update_ID3_tags', "Not able to create temporary batch file to run 'ffmpeg': $^E, $!" );
+	openL ( \$ffmpegFH, '>:encoding(UTF-8)', $ffmpegBat ) or badExit( 'update_ID3_tags', "Not able to create temporary batch file to run 'ffmpeg': '" . $ffmpegBat . "'" );
 		my $prevfh = select $ffmpegFH; $| = 1; select $prevfh;
 		#write empty line to batch file in case of file header conflict
 		print $ffmpegFH "\n" . 'chcp 65001' . "\n" . 'call ' . join( " ", @ffmpeg );
@@ -1280,15 +1290,21 @@ sub writeTags
 
 	#execute batch file wrapper to call 'ffmpeg' commands batch file
 	toLog( 'update_ID3_tags', "   - Executing batch file for 'ffmpeg'\n" );
-	my $outAndError;
-	run3( $ffmpegBat, \undef, \$outAndError, \$outAndError );
-	badExit( 'update_ID3_tags', "Not able to run batch file wrapper: " . $ffmpegBat . ", returned: " . $? . ", and: " . $outAndError ) if ( $? );
+	my ( $rawStdOutErr, $stdOutErr );
+	run3( $ffmpegBat, \undef, \$rawStdOutErr, \$rawStdOutErr );
+	$stdOutErr = decode( $Config{enc_to_system} || 'UTF-8', $rawStdOutErr );
+	badExit( 'update_ID3_tags', "Not able to run 'ffmpeg', returned:\n" . $stdOutErr ) if ( $? || $stdOutErr );
 
 	#removing temp song file & 'ffmpeg' batch file, if successful
 	toLog( 'update_ID3_tags', "   - Removing temporary song files & batch files\n" );
 	if ( testL ( 'e', $songFile ) ) {
-		unlinkL ( $songFilePath . $tmpSongFileName ) or warning( 'update_ID3_tags', "Not able to remove temporary song file: '" . $songFilePath . $tmpSongFileName . "': $^E, $!" );
-		unlinkL ( $ffmpegBat ) or warning( 'update_ID3_tags', "Not able to remove temporary 'ffmpeg' batch file: '" . $ffmpegBat . "': $^E, $!" );
+		my $unlinkErr;
+		my $fileDel = unlinkL ( $songFilePath . $tmpSongFileName );
+		$unlinkErr = decode( $Config{enc_to_system} || 'UTF-8', $^E );
+		warning( 'update_ID3_tags', "Not able to remove temporary song file: '" . $songFilePath . $tmpSongFileName . "', returned:\n" . $unlinkErr ) if ( ! $fileDel );
+		$fileDel = unlinkL ( $ffmpegBat );
+		$unlinkErr = decode( $Config{enc_to_system} || 'UTF-8', $^E );
+		warning( 'update_ID3_tags', "Not able to remove temporary 'ffmpeg' batch file: '" . $ffmpegBat . "', returned:\n" . $unlinkErr ) if ( ! $fileDel );
 	} else {
 		badExit( 'update_ID3_tags', "Not able to remove temporary song file & batch files for song file: '" . $songFile . "'" );
 	}
@@ -1300,13 +1316,20 @@ sub warning
 #----------------------------------------------------------------------------------------------------------
 {
 	my ( $funcName, $msg ) = @_;
-	#increase overall warning count
-	++$warnCnt;
+
+	updStatus( undef, 'Warning...' );
+
+	#set global warn hash with increasing warning count
+	++$warn{global};
 	if ( $funcName ) {
-		toLog( $funcName, "\n *WARNING* (" . $warnCnt . "): $msg,\n" . shortmess() . "\n" );
+		#set warn hash for function with increasing warning count
+		++$warn{$funcName};
+		toLog( $funcName, "\n *WARNING* (" . $warn{$funcName} . "): $msg,\n" . shortmess() . "\n" );
 	} else {
-		toLog( undef, "\n *WARNING* (" . $warnCnt . "): $msg,\n" . shortmess() . "\n" );
+		toLog( undef, "\n *WARNING* (" . $warn{global} . "): $msg,\n" . shortmess() . "\n" );
 	}
+
+	promptUser( 'warning', $msg );
 }
 
 #----------------------------------------------------------------------------------------------------------
@@ -1317,8 +1340,13 @@ sub badExit
 	my ( $funcName, $error ) = @_;
 
 	#store any returned system error info
-	if ( $! or $@ ) {
-	  $error .= "\n\n failed with following error message: $!$@";
+	my $rawSysError = $!;
+	my $rawEvalError = $@;
+	#decode raw error to use Unicode
+	my $sysError = decode( $Config{enc_to_system} || 'UTF-8', $rawSysError );
+	my $evalError = decode( $Config{enc_to_system} || 'UTF-8', $rawEvalError );
+	if ( $sysError or $evalError ) {
+	  $error .= "\n\n *Failed with following system error message: $sysError\n *Failed with following eval error message: $evalError";
 	}
 	updStatus( undef, 'ERROR...' );
 
@@ -1347,7 +1375,7 @@ sub badExit
 }
 
 #----------------------------------------------------------------------------------------------------------
-# function 1 or function 2 ends successfully - log closed and window refreshed for restart
+# function ends successfully - log closed and window refreshed for restart
 sub tkEnd
 #----------------------------------------------------------------------------------------------------------
 {
@@ -1356,15 +1384,15 @@ sub tkEnd
 	#close log file
 	endLog( $funcName );
 	undef $log;
-  $log = "$dirName$FS$progName.log";
+  $log = "$dirName$progName.log";
 
 	#focus on exit button and reset status
 	$proc = 'Waiting on command...';
 	$M->{'exit'}->focus();
 
 	#reset buttons
-	$M->{'func1'}->configure(
-		-text=>'Function 1',
+	$M->{'update'}->configure(
+		-text=>'Update ID3 Tags',
 		-font=>TK_FNT_B,
 		-state=>'normal',
 		-bg=>TK_COLOR_BG,
@@ -1412,7 +1440,7 @@ sub startLog
 	  	my $dir = getcwdL();
 	    $log = "$dir$FS$progName.log";
 		}
-		openL ( \$funcLogFH, '>:encoding(UTF-8)', $log ) or badExit( $funcName, "Not able to create log file\n creating in <$log>" );
+		openL ( \$funcLogFH, '>:encoding(UTF-8)', $log ) or badExit( $funcName, "Not able to create log file: '" . $log . "'" );
 		#redirect STDERR to log file
 		open STDERR, '>>:encoding(UTF-8)', $log;
 		my $oldfh = select $funcLogFH; $| = 1; select $oldfh;
@@ -1425,12 +1453,13 @@ sub startLog
 	  	my $dir = getcwdL();
 	    $log = "$dir$FS$progName.log";
 	  }
-		openL ( \$logFH, '>:encoding(UTF-8)', $log ) or badExit( undef, "Not able to create log file\n creating in <$log>" );
+		openL ( \$logFH, '>:encoding(UTF-8)', $log ) or badExit( undef, "Not able to create log file: '" . $log . "'" );
 		#redirect STDERR to log file
 		open STDERR, '>>:encoding(UTF-8)', $log;
 		my $oldfh = select $logFH; $| = 1; select $oldfh;
 
 		toLog( undef, "$SEP\nTool: $progName\n\tVersion: $Version\n\n\tDate: $timeSt\n$Sep" );
+		toLog( undef, "$progName Process Started\n$Sep\n" );
 	}
 }
 
@@ -1478,35 +1507,18 @@ sub endLog
 
 	if ( ( $funcName ) && ( fileno( $funcLogFH ) ) ) {
 		#output any warning data
-		if ( $warnCnt > 0 ) {
-			toLog( $funcName, "\n\n   **(" . $warnCnt . ") Warnings were detected**\n\n" );
+		if ( $warn{$funcName} ) {
+			toLog( $funcName, "\n   **(" . $warn{$funcName} . ") Warnings were detected**\n\n" );
 		}
 		toLog( $funcName, "$funcName Process Completed\n$SEP\n\n" );
 		close $funcLogFH;
 	} elsif ( fileno( $logFH ) ) {
 		#output any warning data
-		if ( $warnCnt > 0 ) {
-			toLog( undef, "\n\n   **(" . $warnCnt . ") Warnings were detected**\n\n" );
+		if ( $warn{global} ) {
+			toLog( undef, "\n   **(" . $warn{global} . ") Warnings were detected**\n\n" );
 		}
     toLog( undef, "$SEP\nTool: $progName\n\tVersion: $Version\n\n\tDate: $timeSt\n$Sep" );
 		toLog( undef, "$progName Process Completed\n$SEP\n\n" );
 		close $logFH;
 	}
 }
-
-=pod
-#set error status for exit
-$stat = 0 unless ( $warnCnt > 1 );
-
-#end log file
-endLog( $stat );
-#echo status to console
-if ( $stat == 0 ) {
-	print "\n...Finished Processing Successfully\n\n";
-} elsif ( $stat == 2 ) {
-	print "\n...Finished Processing with (" . $warnCnt . ") Warnings\n\n";
-} else {
-	print "\n...Processing Failed\n\n";
-}
-exit;
-=cut
