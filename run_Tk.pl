@@ -1,11 +1,19 @@
 #!/usr/bin/perl
 use strict;
 use warnings;
+
+use utf8::all;
 use Tk;
 
 # Create the main window
 my $mw = MainWindow->new;
 $mw->title("Perl GUI Example");
+
+#list system fonts
+my @fontList = $mw->fontFamilies;
+foreach my $font ( @fontList ) {
+	print "   $font\n";
+}
 
 # Add a label widget
 my $label = $mw->Label(-text => "Hello, Perl GUI!");
