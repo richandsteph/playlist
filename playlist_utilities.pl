@@ -20,23 +20,27 @@
 #
 # Version 1.0 - 31 Jan 2026	 RAD initial creation
 #         1.1 -  1 Feb 2026	 RAD incorporated 'update_ID3_tags' script into function subroutine (replacing 
-#                                  tkStart1), changed Tk font to 'Lucida Sans Unicode', changed Warning 
-#                                  count to hash of warnings per function & global overall count when 
-#                                  logging warnings, standardized error & warning message format, cleaned 
-#                                  up some code formatting, changed test for selection (or passing) of 
-#                                  file/directory to $filePath in function subroutines, added clean-up of 
-#                                  warning within function subroutine to return to MainLoop, changed 
-#                                  handling of warning/badExit messages to decode raw message into Unicode 
-#                                  characters, removed $FS when using $dirName (which ends in backslash), 
-#                                  added some log formatting
+#                                tkStart1), changed Tk font to 'Lucida Sans Unicode', changed Warning 
+#                                count to hash of warnings per function & global overall count when 
+#                                logging warnings, standardized error & warning message format, cleaned 
+#                                up some code formatting, changed test for selection (or passing) of 
+#                                file/directory to $filePath in function subroutines, added clean-up of 
+#                                warning within function subroutine to return to MainLoop, changed 
+#                                handling of warning/badExit messages to decode raw message into Unicode 
+#                                characters, removed $FS when using $dirName (which ends in backslash), 
+#                                added some log formatting
+#         1.2 -  1 Feb 2026	 RAD incorporated 'renumber' script into function subroutine / modified all 
+#                                badExit() subroutine calls to decode Unicode in messages / updated TO-DO 
+#                                / reformatted coding
 #
 #
 #   TO-DO:
 #         1) create functions to do items in Desc, modifying tkStart2
+#         2) modify renumber() to accept either directory of XML files OR individual chosen XML file
 #
 #**********************************************************************************************************
 
-my $Version = "1.1";
+my $Version = "1.2";
 
 use strict;
 use warnings;
@@ -63,20 +67,20 @@ use Win32::LongPath qw( abspathL chdirL getcwdL openL renameL testL unlinkL );
 
 #Tk setup
 #colors from rgb.txt
-use constant TK_COLOR_BG		=> 'SlateGray1';
-use constant TK_COLOR_FIELD	=> 'AliceBlue';
-use constant TK_COLOR_FG		=> 'black';
-use constant TK_COLOR_ABG		=> 'goldenrod1';
+use constant TK_COLOR_BG			=> 'SlateGray1';
+use constant TK_COLOR_FIELD		=> 'AliceBlue';
+use constant TK_COLOR_FG			=> 'black';
+use constant TK_COLOR_ABG			=> 'goldenrod1';
 use constant TK_COLOR_LGREEN	=> 'palegreen';
 use constant TK_COLOR_GREYBUT	=> 'gray54';
 use constant TK_COLOR_LRED		=> 'tomato';
 #font using Unix-centric font name:-foundry-family-weight-slant-setwidth-addstyle-pixel-point-resx-resy-spacing-width-charset-encoding, "*" defaults and last "*" defaults remaining values
 use constant TK_FNT_BIGGER		=> "-*-{Lucida Sans Unicode}-bold-r-normal-*-18-*";
-use constant TK_FNT_BIGB		=> "-*-{Lucida Sans Unicode}-bold-r-normal-*-14-*";
-use constant TK_FNT_BIG			=> "-*-{Lucida Sans Unicode}-medium-r-normal-*-14-*";
-use constant TK_FNT_BI			=> "-*-{Lucida Sans Unicode}-bold-i-normal-*-12-*";
-use constant TK_FNT_B			=> "-*-{Lucida Sans Unicode}-bold-r-normal-*-12-*";
-use constant TK_FNT_I			=> "-*-{Lucida Sans Unicode}-medium-i-normal-*-12-*";
+use constant TK_FNT_BIGB			=> "-*-{Lucida Sans Unicode}-bold-r-normal-*-14-*";
+use constant TK_FNT_BIG				=> "-*-{Lucida Sans Unicode}-medium-r-normal-*-14-*";
+use constant TK_FNT_BI				=> "-*-{Lucida Sans Unicode}-bold-i-normal-*-12-*";
+use constant TK_FNT_B					=> "-*-{Lucida Sans Unicode}-bold-r-normal-*-12-*";
+use constant TK_FNT_I					=> "-*-{Lucida Sans Unicode}-medium-i-normal-*-12-*";
 
 umask 000;
 
@@ -89,7 +93,7 @@ my ( $dirName, $fileName, $filePath, $log, $stat );
 my ( $funcLogFH, $logFH );
 #determine program name
 my $progName = progName();
-#set warning hash
+#initialize warning hash
 my %warn;
 
 #command-line tools for song metadata manipulation
@@ -236,26 +240,34 @@ sub progName
 }
 
 #----------------------------------------------------------------------------------------------------------
-# read directory and build a list of XML files
-sub getFiles
+# read directory and returns a list of XML files
+sub getXML_List
 #----------------------------------------------------------------------------------------------------------
 {
-	my ( @fileFolder, @files );
+	my @xmlList;
 
-	updStatus( undef, 'Building list of files...' );
+	updStatus( undef, 'Building list of XML files...' );
 
-	opendir DIR, $dirName or badExit( undef, "Could not open directory\n looking in: '$dirName'" );
-		@fileFolder = readdir DIR;
-	closedir DIR;
-	@files = grep m/\.xml$/i, @fileFolder;
-	unless ( scalar( @files ) ) {
-		badExit( undef, "No files were found in directory\n looking in: '$dirName'" );
+	my $workingDir = getcwdL();
+	my $dir = Win32::LongPath->new();
+	$dir->opendirL( $dirName );
+	my $dirSysError = decode( $Config{enc_to_system} || 'UTF-8', $! );
+	my $dirEvalError = decode( $Config{enc_to_system} || 'UTF-8', $@ );
+	badExit( 'renumber', "Not able to open directory: '" . $dirName . "', returned:\n" . $dirSysError . "\nand:\n" . $dirEvalError ) if ( $dirSysError || $dirEvalError );
+	@xmlList = grep m/\.xml$/i, $dir->readdirL();
+	$dir->closedirL();
+
+	#add path info to each XML file in list
+	my @newList;
+	foreach my $file ( @xmlList ) {
+		push @newList, $dirName . $file;
 	}
-	
-	#change to working directory
-	chdirL( $fileFolder[0] );
 
-	return( @files );
+	unless ( scalar( @newList ) ) {
+		badExit( 'renumber', "No files were found in directory: '" . $dirName . "'" );
+	}
+
+	return( @newList );
 }
 
 #----------------------------------------------------------------------------------------------------------
@@ -263,99 +275,190 @@ sub tkMainWindow
 #----------------------------------------------------------------------------------------------------------
 {
 	#main window
-	$M->{'window'}->configure( -bg=>TK_COLOR_BG, -fg=>TK_COLOR_FG, -title=>"$progName..." );
+	$M->{'window'}->configure(
+		-bg		 => TK_COLOR_BG,
+		-fg		 => TK_COLOR_FG,
+		-title => "$progName..."
+	);
 	
 	#frames
-	my $title    = $M->{'window'}->Frame( -bg=>TK_COLOR_BG )->grid( -row=>'0' );
-	my $choose	 = $M->{'window'}->Frame( -bg=>TK_COLOR_BG )->grid( -row=>'1' );
-	my $status   = $M->{'window'}->Frame( -bg=>TK_COLOR_BG )->grid( -row=>'2', -sticky=>'we' );
-	my $buttons  = $M->{'window'}->Frame( -bg=>TK_COLOR_BG )->grid( -row=>'3' );
-	my $statbar  = $M->{'window'}->Frame()->grid( -row=>'4', -sticky=>'we' );
+	my $title				= $M->{'window'}->Frame( -bg => TK_COLOR_BG )->grid( -row => '0' );
+	my $chooseFile	= $M->{'window'}->Frame( -bg => TK_COLOR_BG )->grid( -row => '1' );
+	my $chooseDir		= $M->{'window'}->Frame( -bg => TK_COLOR_BG )->grid( -row => '2', -sticky => 'we' );
+	my $status   		= $M->{'window'}->Frame( -bg => TK_COLOR_BG )->grid( -row => '3', -sticky => 'we' );
+	my $buttons  		= $M->{'window'}->Frame( -bg => TK_COLOR_BG )->grid( -row => '4' );
+	my $statbar  		= $M->{'window'}->Frame()->grid( -row => '5', -sticky => 'we' );
 	
 	#title frame
 	$title->Label(
-		-bg=>TK_COLOR_BG,
-		-fg=>TK_COLOR_FG,
-		-font=>TK_FNT_BIGGER,
-		-text=>"$progName Tool"
-	)->pack( -pady=>'0' );
+		-bg 	=> TK_COLOR_BG,
+		-fg 	=> TK_COLOR_FG,
+		-font => TK_FNT_BIGGER,
+		-text => "$progName Tool"
+	)->pack(
+		-pady => '0'
+	);
 	$title->Label(
-		-bg=>TK_COLOR_BG,
-		-fg=>TK_COLOR_FG,
-		-font=>TK_FNT_I,
-		-text=>"Version: $Version",
-		-anchor=>'e'
-	)->pack( -side=>'right', -pady=>'0' );
-	
-	#directory or file choose frame:
-	#   change the -text value to 'File:' for files
-	#   change the -textvariable value to \$filePath for files
-	#   change the -command value to '[\&tkGetFile, $filePath]' for files
-	$choose->Label(
-		-text=>'File:',
-		-font=>TK_FNT_BIGB,
-		-bg=>TK_COLOR_BG,
-		-fg=>TK_COLOR_FG
-	)->pack( -side=>'left' );
-	my $entry = $choose->Entry(
-		-textvariable=>\$filePath,
-		-width=>'30',
-		-bg=>TK_COLOR_FIELD,
-		-fg=>TK_COLOR_FG
-	)->pack( -side=>'left' );
-	$entry->xview( 'end' );
-	$M->{'select'} = $choose->Button(
-		-text => "...",
-		-command => [ \&tkGetFile, $filePath ],
-		-bg => TK_COLOR_BG,
-		-fg => TK_COLOR_FG,
-		-activebackground=>TK_COLOR_ABG,
-		-width => 3
-	)->pack( -side=>'left', -padx=>'2', -pady=>'8' );
+		-bg 		=> TK_COLOR_BG,
+		-fg 		=> TK_COLOR_FG,
+		-font 	=> TK_FNT_I,
+		-text 	=> "Version: $Version",
+		-anchor => 'e'
+	)->pack(
+		-side 	=> 'right',
+		-pady 	=> '0'
+	);
+
+	#file choose frame:
+	$chooseFile->Label(
+		-text => 'File:',
+		-font => TK_FNT_BIGB,
+		-bg 	=> TK_COLOR_BG,
+		-fg 	=> TK_COLOR_FG
+	)->pack(
+		-side => 'left',
+		-pady => '0',
+		-padx => [ 38, 0 ]
+	);
+	my $fileEntry = $chooseFile->Entry(
+		-textvariable => \$filePath,
+		-width				=> '30',
+		-bg						=> TK_COLOR_FIELD,
+		-fg						=> TK_COLOR_FG
+	)->pack(
+		-side					=> 'left',
+		-pady					=> '0'
+	);
+	$fileEntry->xview( 'end' );
+	$M->{'select'} = $chooseFile->Button(
+		-text							=> "...",
+		-command					=> [ \&tkGetFile, $filePath ],
+		-bg								=> TK_COLOR_BG,
+		-fg								=> TK_COLOR_FG,
+		-activebackground => TK_COLOR_ABG,
+		-width						=> '3'
+	)->pack(
+		-side							=> 'left',
+		-padx							=> '2',
+		-pady							=> '0'
+	);
+
+	#directory choose frame:
+	$chooseDir->Label(
+		-text => 'Directory:',
+		-font => TK_FNT_BIGB,
+		-bg		=> TK_COLOR_BG,
+		-fg		=> TK_COLOR_FG
+	)->pack(
+		-side => 'left'
+	);
+	my $dirEntry = $chooseDir->Entry(
+		-textvariable => \$dirName,
+		-width	=> '30',
+		-bg			=> TK_COLOR_FIELD,
+		-fg			=> TK_COLOR_FG
+	)->pack(
+		-side		=> 'left'
+	);
+	$dirEntry->xview( 'end' );
+	$M->{'select'} = $chooseDir->Button(
+		-text							=> "...",
+		-command					=> [ \&tkGetDir, $dirName ],
+		-bg								=> TK_COLOR_BG,
+		-fg								=> TK_COLOR_FG,
+		-activebackground => TK_COLOR_ABG,
+		-width						=> '3'
+	)->pack(
+		-side							=> 'left',
+		-padx							=> '2',
+		-pady							=> '8'
+	);
 
 	#status frame
-	my $statframe = $status->Frame( -relief=>'sunken', -borderwidth=>'2', -bg=>TK_COLOR_FIELD )->pack( -padx=>'4', -fill=>'x' );
-	$M->{'progress'}= $statframe->Label( -bg=>TK_COLOR_FIELD, -textvariable=>\$stat )->pack( -side=>'left', -fill=>'x' );
+	my $statframe = $status->Frame(
+		-relief				=> 'sunken',
+		-borderwidth	=> '2',
+		-bg						=> TK_COLOR_FIELD
+	)->pack(
+		-padx					=> '4',
+		-fill					=> 'x'
+	);
+	$M->{'progress'} = $statframe->Label(
+		-bg						=> TK_COLOR_FIELD,
+		-textvariable => \$stat
+	)->pack(
+		-side					=> 'left',
+		-fill					=> 'x'
+	);
 
 	#buttons frame
 	$M->{'update'} = $buttons->Button(
-		-text=>'Update ID3 Tags',
-		-font=>TK_FNT_B,
-		-command=>\&update_ID3_tags,
-		-borderwidth=>'4',
-		-bg=>TK_COLOR_BG,
-		-fg=>TK_COLOR_FG,
-		-activebackground=>TK_COLOR_LGREEN,
-		-disabledforeground=>TK_COLOR_GREYBUT,
-		-width=>'11'
-	)->pack( -side=>'left', -padx=>'2', -pady=>'8' );
-	$M->{'func2'} = $buttons->Button(
-		-text=>'Function 2',
-		-font=>TK_FNT_B,
-		-command=>\&tkStart2,
-		-borderwidth=>'4',
-		-bg=>TK_COLOR_BG,
-		-fg=>TK_COLOR_FG,
-		-activebackground=>TK_COLOR_ABG,
-		-disabledforeground=>TK_COLOR_GREYBUT,
-		-width=>'11'
-	)->pack( -side=>'left', -padx=>'2', -pady=>'8' );
+		-text								=> 'Update ID3 Tags',
+		-font								=> TK_FNT_B,
+		-command						=> \&update_ID3_tags,
+		-borderwidth				=> '4',
+		-bg									=> TK_COLOR_BG,
+		-fg									=> TK_COLOR_FG,
+		-activebackground		=> TK_COLOR_LGREEN,
+		-disabledforeground => TK_COLOR_GREYBUT,
+		-width							=> '14'
+	)->pack(
+		-side								=> 'left',
+		-padx								=> '2',
+		-pady								=> '8'
+	);
+	$M->{'renumber'} = $buttons->Button(
+		-text								=> 'Renumber',
+		-font								=> TK_FNT_B,
+		-command						=> \&renumber,
+		-borderwidth				=> '4',
+		-bg									=> TK_COLOR_BG,
+		-fg									=> TK_COLOR_FG,
+		-activebackground		=> TK_COLOR_ABG,
+		-disabledforeground => TK_COLOR_GREYBUT,
+		-width							=> '11'
+	)->pack(
+		-side								=> 'left',
+		-padx								=> '2',
+		-pady								=> '8'
+	);
 	$M->{'exit'} = $buttons->Button(
-		-text=>'Exit',
-		-font=>TK_FNT_B,
-		-command=>\&tkExit,
-		-borderwidth=>'4',
-		-bg=>TK_COLOR_BG,
-		-fg=>TK_COLOR_FG,
-		-activebackground=>TK_COLOR_LRED,
-		-width=>'11'
-	)->pack( -padx=>'2', -pady=>'8' );
+		-text							=> 'Exit',
+		-font							=> TK_FNT_B,
+		-command					=> \&tkExit,
+		-borderwidth			=> '4',
+		-bg								=> TK_COLOR_BG,
+		-fg								=> TK_COLOR_FG,
+		-activebackground => TK_COLOR_LRED,
+		-width						=> '8'
+	)->pack(
+		-padx							=> '2',
+		-pady							=> '8'
+	);
 
 	#status bar frame
-	my $leftframe = $statbar->Frame( -borderwidth=>'2' )->pack( -side=>'left' );
-	$M->{'bottomLeft'}= $leftframe->Label( -text=>' Status ' )->pack( -side=>'left' );
-	my $frame2 = $statbar->Frame( -relief=>'sunken', -borderwidth=>'2' )->pack( -side=>'left', -fill=>'x' );
-	$M->{'bottomRight'}= $frame2->Label( -textvariable=>\$proc )->pack( -side=>'left' );
+	my $leftframe = $statbar->Frame(
+		-borderwidth	=> '2'
+	)->pack(
+		-side					=> 'left'
+	);
+	$M->{'bottomLeft'}= $leftframe->Label(
+		-text	=> ' Status '
+	)->pack(
+		-side	=> 'left'
+	);
+	my $frame2 = $statbar->Frame(
+		-relief				=> 'sunken',
+		-borderwidth	=> '2'
+	)->pack(
+		-side					=> 'left',
+		-fill					=> 'x'
+	);
+	$M->{'bottomRight'}= $frame2->Label(
+		-textvariable => \$proc
+	)->pack(
+		-side					=> 'left'
+	);
 	
 	#output date and time
 	my $now = dateTime();
@@ -410,22 +513,27 @@ sub promptUser
 	#create prompt window
 	my $win = $M->{'window'};
 	my $dialog = $win->DialogBox(
-		-title=>$title,
-		-background=>TK_COLOR_BG,
-		-buttons=>[ @buttons ],
+		-title			=> $title,
+		-background => TK_COLOR_BG,
+		-buttons		=> [ @buttons ]
 	);
 	$dialog->transient( '' );
 	$dialog->add(
 		'Label',
-		-bitmap=>$image,
-		-background=>TK_COLOR_BG
-	)->pack( -side=>'left', -padx=>'8' );
+		-bitmap			=> $image,
+		-background => TK_COLOR_BG
+	)->pack(
+		-side				=> 'left',
+		-padx				=> '8'
+	);
 	$dialog->add(
 		'Label',
-		-text=>$txt,
-		-font=>TK_FNT_BIG,
-		-background=>TK_COLOR_BG
-	)->pack( -side=>'left' );
+		-text				=> $txt,
+		-font				=> TK_FNT_BIG,
+		-background => TK_COLOR_BG
+	)->pack(
+		-side				=> 'left'
+	);
 
 	#return user choice
 	my $ans = $dialog->Show( -global );
@@ -437,20 +545,22 @@ sub promptUser
 sub tkGetDir
 #----------------------------------------------------------------------------------------------------------
 {
-	my ( $filePath ) = @_;
+	my ( $getDirPath ) = @_;
 	my $dir;
 
-	if ( testL ( 'e', $filePath ) ) {
-		( undef, $dir ) = fileparse( abspathL ( $filePath ) );
+	if ( testL ( 'd', $getDirPath ) ) {
+		( undef, $dir ) = fileparse( abspathL ( $getDirPath ) );
 	}
 
-	$filePath = $M->{'window'}->chooseDirectory(
-		-initialdir=>$dir,
-		-title=>'Choose Directory...'
+	$getDirPath = $M->{'window'}->chooseDirectory(
+		-initialdir => $dir,
+		-title			=> 'Choose Directory...'
 	);
 
-	if ( $dir ) {
-		$dirName = $dir;
+	if ( testL ( 'd', $getDirPath ) ) {
+		$dirName = $getDirPath;
+		$dirName = $dirName . '\\';
+		$dirName =~ s#[\/\\]#$FS#g;
 	}
 }
 
@@ -462,17 +572,18 @@ sub tkGetFile
 	my ( $getFilePath ) = @_;
 
 	my ( $dir, $file );
-	if ( $getFilePath ) {
+	if ( testL ( 'e', $getFilePath ) ) {
 		( $file, $dir ) = fileparse( abspathL ( $getFilePath ) );
 	}
 
 	$getFilePath = $M->{'window'}->getOpenFile(
-		-initialdir=>$dir,
-		-initialfile=>$file,
-		-title=>'Choose File...'
+		-initialdir		=> $dir,
+		-initialfile	=> $file,
+		-title				=> 'Choose File...'
 	);
 
-	if ( $getFilePath ) {
+	$getFilePath =~ s#[\/\\]#$FS#g;
+	if ( testL ( 'e', $getFilePath ) ) {
 		$filePath = $getFilePath;
 		if ( $dir && $file ) {
 			$fileName = $file;
@@ -495,37 +606,214 @@ sub tkStart2
 			badExit( 'Function2', "User chose to stop process,\n no file (or directory) selected or passed" );
 		}
 		$M->{'select'}->focus();
-
 		return;
 	}
 
 	#change buttons to indicate process started
 	$M->{'update'}->configure(
-		-text=>'update_ID3_tags',
-		-font=>TK_FNT_BI,
-		-state=>'disabled',
-		-fg=>TK_COLOR_GREYBUT,
-		-bg=>TK_COLOR_BG,
-		-activebackground=>TK_COLOR_BG,
+		-text							=> 'update_ID3_tags',
+		-font							=> TK_FNT_BI,
+		-state						=> 'disabled',
+		-fg								=> TK_COLOR_GREYBUT,
+		-bg								=> TK_COLOR_BG,
+		-activebackground => TK_COLOR_BG,
 	);
 	$M->{'func2'}->configure(
-		-text=>'Running...',
-		-font=>TK_FNT_B,
-		-state=>'disabled',
-		-fg=>TK_COLOR_GREYBUT,
-		-bg=>TK_COLOR_FIELD,
-		-activebackground=>TK_COLOR_FIELD
+		-text							=> 'Running...',
+		-font							=> TK_FNT_B,
+		-state						=> 'disabled',
+		-fg								=> TK_COLOR_GREYBUT,
+		-bg								=> TK_COLOR_FIELD,
+		-activebackground => TK_COLOR_FIELD
 	);
 	$M->{'exit'}->focus();
 
 	#starting log process
 	startLog( 'Function2' );
 	
-	#process ended
+	#process end
 	my $folderNm;
 	( $folderNm ) = fileparse( abspathL ( $dirName ) );
 	updStatus( "Finished processing \"" . $folderNm . "\"" );
 	tkEnd( 'Function2' );
+}
+
+#----------------------------------------------------------------------------------------------------------
+#function to renumber XML nodes in XML playlist
+sub renumber
+#----------------------------------------------------------------------------------------------------------
+{
+	#must specify directory
+	unless ( $dirName ) {
+		my $ans = promptUser( 'warning', "No directory selected or passed,\n do you want to continue?", 'Yes', 'No' );
+		if ( $ans =~ m#No# ) {
+			badExit( 'renumber', "User chose to stop process,\n no directory selected or passed" );
+		}
+		$M->{'select'}->focus();
+		return;
+	}
+
+	#change buttons to indicate process started
+	$M->{'update'}->configure(
+		-text							=> 'Update ID3 Tags',
+		-font							=> TK_FNT_BI,
+		-state						=> 'disabled',
+		-fg								=> TK_COLOR_GREYBUT,
+		-bg								=> TK_COLOR_BG,
+		-activebackground => TK_COLOR_BG,
+	);
+	$M->{'renumber'}->configure(
+		-text							=> 'Renumbering...',
+		-font							=> TK_FNT_B,
+		-state						=> 'disabled',
+		-fg								=> TK_COLOR_GREYBUT,
+		-bg								=> TK_COLOR_FIELD,
+		-activebackground => TK_COLOR_FIELD
+	);
+	$M->{'exit'}->focus();
+
+	#starting log process
+	toLog( undef, "\n\n  Renumbering:\n    See '" . $dirName . "renumber.log' for details\n\n" );
+	startLog( 'renumber' );
+	
+	#retrieve list of XML files in $dirName
+	my @fileList = getXML_List( $dirName );
+
+	#loop through each XML file in directory
+	foreach my $xmlFile ( @fileList ) {
+		toLog( 'renumber', "...Processing XML File: '$xmlFile'\n\n" );
+		#echo status to console
+		binmode( STDOUT, ":encoding(UTF-8)" );
+		print "\n   Renumbering '$xmlFile'\n";
+	
+		#load XML data
+		my ( $dom, $xmlInFH );
+		openL ( \$xmlInFH, '<:encoding(UTF-8)', $xmlFile );
+		if ( ! fileno( $xmlInFH ) ) {
+			my $xmlSysErr = decode( $Config{enc_to_system} || 'UTF-8', $! );
+			my $xmlEvalErr = decode( $Config{enc_to_system} || 'UTF-8', $@ );
+			badExit( 'renumber', "Not able to open XML file: '" . $xmlFile . "', returned:\n" . $xmlSysErr . "\nand:\n" . $xmlEvalErr );
+		} else {
+			binmode( $xmlInFH );
+			$dom = XML::LibXML->load_xml( IO => $xmlInFH );
+			if ( ! $dom ) {
+				my $xmlSysErr = decode( $Config{enc_to_system} || 'UTF-8', $! );
+				my $xmlEvalErr = decode( $Config{enc_to_system} || 'UTF-8', $@ );
+				badExit( 'renumber', "Couldn't load XML file: '" . $xmlFile . "', returned:\n" . $xmlSysErr . "\nand:\n" . $xmlEvalErr );
+			} else {
+				close( $xmlInFH );
+			}
+		}
+	
+		#create XML writer object, so can output empty XML elements without collapsing
+		my $writer = XML::Writer->new( OUTPUT => 'self', DATA_MODE => 1, DATA_INDENT => 2, UNSAFE => 1, ENCODING => 'utf-8' );
+		if ( ! $writer ) {
+			my $writeSysErr = decode( $Config{enc_to_system} || 'UTF-8', $! );
+			my $writeEvalErr = decode( $Config{enc_to_system} || 'UTF-8', $@ );
+			badExit( 'renumber', "Not able to create new XML::Writer object, returned:\n" . $writeSysErr . "and:\n" . $writeEvalErr );
+		} else {
+			#write XML Declaration
+			$writer->xmlDecl( "UTF-8" ) or badExit( 'renumber', "Not able to write out XML Declaration" );
+			$writer->comment( "*IMPORTANT*: Only 1 attribute/value pair is allowed per each child node of <song>" );
+		}
+		
+		#cycle through number nodes
+		my $nodeCnt = 0;
+		#set date in <playlist> attribute
+		my $playlistNode = $dom->findnodes( '/playlist' );
+		toLog( 'renumber', "\tSetting current date/time in <playlist> node\n" );
+		#get playlist @name for writing out
+		my @playlistName = $dom->findvalue( '/playlist/@name' );
+		my $now = dateTime();
+		my $today = $now->{'date'} . " at " . $now->{'time'};
+		$writer->startTag( "playlist", name => $playlistName[0], date => $today );
+	
+		my %title;
+	
+		foreach my $songNode ( $dom->findnodes( '//song' ) ) {
+			#renumber node textual content
+			$nodeCnt++;
+	
+			#get @number value and compare to counter, then write XML 'song' start tag
+			my $numberVal = $songNode->findvalue( './@number' );
+			if ( $numberVal !~ m#^$nodeCnt$# ) {
+				#change @number to new $nodeCnt
+				toLog( 'renumber', "\tNode content changed from: $numberVal to $nodeCnt\n" );
+				#write out XML 'song' element
+				$writer->startTag( "song", number => $nodeCnt );
+			} else {
+				#write out XML 'song' element
+				$writer->startTag( "song", number => $numberVal );
+			}
+	
+			#search empty elements and add empty node to avoid collapsed tag output
+			foreach my $subNode ( $songNode->findnodes( '*' ) ) {
+				my $nodeName = $subNode->nodeName;
+				#determine if <title> has duplicate content with another node
+				if ( $nodeName =~ m#^title$#i ) {
+					my $titleContent = $subNode->textContent;
+					foreach my $val ( values( %title ) ) {
+						if ( $val =~ m#^$titleContent$#i ) {
+							toLog( 'renumber', "\tNOTE: The content '" . $titleContent . "' of <title> in <song> no. " . $nodeCnt . " is duplicated\n" );
+						}
+					}
+					#store current <title> content in hash for checking against other nodes
+					$title{$nodeCnt} = $titleContent;
+				}
+				#determine attributes for tag, **can only process 1 attribute=value per $subNode**
+				if ( $subNode->hasAttributes() ) {
+					#get list of attributes
+					my @nodeAtts = $subNode->attributes();
+					#format atts for start tag code
+					my ( $listAtt, $listAttVal );
+					if ( $nodeAtts[0] =~ m#\s*([^=\n]+)="([^"\n]+)"# ) {
+						$listAtt = $1;
+						$listAttVal = $2;
+					}
+					$writer->startTag( $nodeName, $listAtt => $listAttVal );
+				} else {
+					$writer->startTag( $nodeName );
+				}
+				#check each tag for empty content
+				if ( ! $subNode->hasChildNodes() ) {
+					$writer->characters( '' );
+				} else {
+					my $nodeContent = $subNode->textContent;
+					$writer->characters( $nodeContent );
+				}
+				#write each end tag
+				$writer->endTag( $nodeName );
+			}
+			#write out close 'song' XML tag
+			$writer->endTag( "song" );
+		}
+			#write out close 'playlist' XML tag
+		$writer->endTag( "playlist" );
+		$writer->end() or badExit( 'renumber', "Not able to end XML document" );
+	
+		#write out renumbered XML playlist file
+		my $xmlOutFH;
+		openL ( \$xmlOutFH, '>:encoding(UTF-8)', $xmlFile );
+		if ( ! fileno( $xmlOutFH ) ) {
+			my $outSysErr = decode( $Config{enc_to_system} || 'UTF-8', $! );
+			my $outEvalErr = decode( $Config{enc_to_system} || 'UTF-8', $@ );
+			badExit( 'renumber', "Not able to create '" . $xmlFile . "', returned:\n" . $outSysErr . "\nand:\n" . $outEvalErr );
+		} else {
+			my $newfh = select $xmlOutFH; $| = 1; select $newfh;
+			print $xmlOutFH $writer;
+			close( $xmlOutFH );
+		}
+		toLog( 'renumber', "\n...Finished renumbering XML file: '" . $xmlFile . "'\n\n\n" );
+		#echo status to console
+		binmode( STDOUT, ":encoding(UTF-8)" );
+		print "   Finished Renumbering '" . $xmlFile . "'\n";
+	}
+
+	#process end
+	my $folderNm;
+	( $folderNm ) = fileparse( abspathL ( $dirName ) );
+	updStatus( "Finished renumbering \"" . $folderNm . "\" folder" );
+	tkEnd( 'renumber' );
 }
 
 #----------------------------------------------------------------------------------------------------------
@@ -545,24 +833,25 @@ sub update_ID3_tags
 
 	#change buttons to indicate process started
 	$M->{'update'}->configure(
-		-text=>'Updating...',
-		-font=>TK_FNT_B,
-		-state=>'disabled',
-		-fg=>TK_COLOR_GREYBUT,
-		-bg=>TK_COLOR_FIELD,
-		-activebackground=>TK_COLOR_FIELD
+		-text							=> 'Updating...',
+		-font							=> TK_FNT_B,
+		-state						=> 'disabled',
+		-fg								=> TK_COLOR_GREYBUT,
+		-bg								=> TK_COLOR_FIELD,
+		-activebackground => TK_COLOR_FIELD
 	);
-	$M->{'func2'}->configure(
-		-text=>'Function2',
-		-font=>TK_FNT_BI,
-		-state=>'disabled',
-		-fg=>TK_COLOR_GREYBUT,
-		-bg=>TK_COLOR_BG,
-		-activebackground=>TK_COLOR_BG,
+	$M->{'renumber'}->configure(
+		-text							=> 'Renumber',
+		-font							=> TK_FNT_BI,
+		-state						=> 'disabled',
+		-fg								=> TK_COLOR_GREYBUT,
+		-bg								=> TK_COLOR_BG,
+		-activebackground => TK_COLOR_BG,
 	);
 	$M->{'exit'}->focus();
 
 	#starting log process
+	toLog( undef, "\n\n  Updating ID3 Tags:\n    See '" . $dirName . "update_ID3_tags.log' for details\n\n" );
 	startLog( 'update_ID3_tags' );
 	
 	#separate out playlist XML filename and directory
@@ -574,11 +863,17 @@ sub update_ID3_tags
 	print "\n   Processing '$playlistFilename.xml'\n";
 	
 	#load playlist XML
-	my $xmlFH;
-	openL ( \$xmlFH, '<:encoding(UTF-8)', $filePath ) or badExit( 'update_ID3_tags', "Not able to open playlist XML file for reading: '" . $filePath . "'" );
+	my ( $dom, $xmlFH );
+	openL ( \$xmlFH, '<:encoding(UTF-8)', $filePath );
+	if ( ! fileno( $xmlFH ) ) {
+		my $xmlSysErr = decode( $Config{enc_to_system} || 'UTF-8', $! );
+		my $xmlEvalErr = decode( $Config{enc_to_system} || 'UTF-8', $@ );
+		badExit( 'update_ID3_tags', "Not able to open playlist XML file for reading: '" . $filePath . "', returned:\n" . $xmlSysErr . "\nand:\n" . $xmlEvalErr );
+	} else {
 		binmode $xmlFH;
-		my $dom = XML::LibXML->load_xml( IO => $xmlFH );
-		badExit( 'update_ID3_tags', "\n\nCouldn't load playlist XML file: $playlistFilename.xml" ) unless ( $dom );
+		$dom = XML::LibXML->load_xml( IO => $xmlFH );
+		badExit( 'update_ID3_tags', "Couldn't load playlist XML file: $playlistFilename.xml" ) unless ( $dom );
+	}
 	
 	#determine playlist name
 	my $playlistName;
@@ -686,17 +981,23 @@ sub update_ID3_tags
 	
 	#write out new playlist XML
 	my $xmlOutFH;
-	openL ( \$xmlOutFH, '>:encoding(UTF-8)', $filePath ) or badExit( 'update_ID3_tags', "Not able to create '" . $filePath . "'" );
-	my $newfh = select $xmlOutFH; $| = 1; select $newfh;
-	print $xmlOutFH $writer or badExit( 'update_ID3_tags', "Not able to write out XML to '$playlistFilename.xml'" );
-	close( $xmlOutFH );
+	openL ( \$xmlOutFH, '>:encoding(UTF-8)', $filePath );
+	if ( ! fileno( $xmlOutFH ) ) {
+		my $xmlSysErr = decode( $Config{enc_to_system} || 'UTF-8', $! );
+		my $xmlEvalErr = decode( $Config{enc_to_system} || 'UTF-8', $@ );
+		badExit( 'update_ID3_tags', "Not able to create '" . $filePath . "', returned:\n" . $xmlSysErr . "\nand:\n" . $xmlEvalErr );
+	} else {
+		my $newfh = select $xmlOutFH; $| = 1; select $newfh;
+		print $xmlOutFH $writer or badExit( 'update_ID3_tags', "Not able to write out XML to '" . $playlistFilename . ".xml'" );
+		close( $xmlOutFH );
+	}
 	toLog( 'update_ID3_tags', "\n...Created playlist XML file: '$filePath'\n\n" );
 	toLog( 'update_ID3_tags', " *WARNING*: There were " . $warn{update_ID3_tags} . " warning(s) for process...\n\n\n" ) if ( $warn{update_ID3_tags} );
 
-	#process ended
+	#process end
 	my $folderNm;
 	( $folderNm ) = fileparse( abspathL ( $dirName ) );
-	updStatus( "Finished processing \"" . $folderNm . "\"" );
+	updStatus( "Finished updating \"" . $folderNm . "\" folder" );
 	tkEnd( 'update_ID3_tags' );
 }
 
@@ -724,10 +1025,16 @@ sub mkvTools
 	my $mkvBatFH;
 	#open/close batch file with commands written to it
 	toLog( 'update_ID3_tags', "   - Creating batch file wrapper for 'mkvextract': '" . $mkvBat . "'\n" );
-	openL ( \$mkvBatFH, '>:encoding(UTF-8)', $mkvBat ) or badExit( 'update_ID3_tags', "Not able to create temporary batch file to run 'mkvextract': '" . $mkvBat . "'" );
+	openL ( \$mkvBatFH, '>:encoding(UTF-8)', $mkvBat );
+	if ( ! fileno( $mkvBatFH ) ) {
+		my $mkvSysErr = decode( $Config{enc_to_system} || 'UTF-8', $! );
+		my $mkvEvalErr = decode( $Config{enc_to_system} || 'UTF-8', $@ );
+		badExit( 'update_ID3_tags', "Not able to create temporary batch file to run 'mkvextract': '" . $mkvBat . "', returned:\n" . $mkvSysErr . "\nand:\n" . $mkvEvalErr );
+	} else {
 		my $oldFH = select $mkvBatFH; $| = 1; select $oldFH;
 		print $mkvBatFH "\n" . 'chcp 65001' . "\n" . 'call ' . join( " ", @mkvArgs );
-	close( $mkvBatFH );
+		close( $mkvBatFH );
+}
 
 	#execute batch file wrapper to call 'mkvextract' command batch file
 	toLog( 'update_ID3_tags', "   - Executing batch file for 'mkvextract'\n" );
@@ -737,12 +1044,18 @@ sub mkvTools
 	badExit( 'update_ID3_tags', "Not able to run 'mkvextract', returned:\n" . $stdOutErr ) if ( $? || $stdOutErr);
 
 	#load XML data
-	my $xmlFH;
-	openL ( \$xmlFH, '<:encoding(UTF-8)', $songFileXml ) or badExit( 'update_ID3_tags', "Not able to open XML file: '$songFileXml' for input" );
+	my ( $dom, $xmlFH );
+	openL ( \$xmlFH, '<:encoding(UTF-8)', $songFileXml );
+	if ( ! fileno( $xmlFH ) ) {
+		my $xmlSysErr = decode( $Config{enc_to_system} || 'UTF-8', $! );
+		my $xmlEvalErr = decode( $Config{enc_to_system} || 'UTF-8', $@ );
+		badExit( 'update_ID3_tags', "Not able to open XML file: '" . $songFileXml . "', returned:\n" . $xmlSysErr . "\nand:\n" . $xmlEvalErr );
+	} else {
 		binmode $xmlFH;
-		my $dom = XML::LibXML->load_xml( IO => $xmlFH );
-		badExit( 'update_ID3_tags', "\n\nCouldn't load XML file: $songFileXml" ) unless ( $dom );
-	close( $xmlFH );
+		$dom = XML::LibXML->load_xml( IO => $xmlFH );
+		badExit( 'update_ID3_tags', "Couldn't load XML file: '" . $songFileXml . "'" ) unless ( $dom );
+		close( $xmlFH );
+	}
 
 	foreach my $xmlNode ( $dom->findnodes( '//Simple' ) ) {
 		my $tagName = $xmlNode->findvalue( './Name' );
@@ -808,16 +1121,28 @@ sub exifTools
 	my ( $jsonBatFH, $jsonFH, $argsFH );
 	#open/close batch file with commands written to it
 	toLog( 'update_ID3_tags', "   - Creating batch file wrapper for 'exiftool': '" . $jsonBat . "'\n" );
-	openL ( \$jsonBatFH, '>:encoding(UTF-8)', $jsonBat ) or badExit( 'update_ID3_tags', "Not able to create temporary batch file to run 'exiftool': '" . $jsonBat . "'" );
+	openL ( \$jsonBatFH, '>:encoding(UTF-8)', $jsonBat );
+	if ( ! fileno( $jsonBatFH ) ) {
+		my $jsonSysErr = decode( $Config{enc_to_system} || 'UTF-8', $! );
+		my $jsonEvalErr = decode( $Config{enc_to_system} || 'UTF-8', $@ );
+		badExit( 'update_ID3_tags', "Not able to create temporary batch file to run 'exiftool': '" . $jsonBat . "', returned:\n" . $jsonSysErr . "\nand:\n" . $jsonEvalErr );
+	} else {
 		my $oldFH = select $jsonBatFH; $| = 1; select $oldFH;
 		print $jsonBatFH "\n" . 'chcp 65001' . "\n" . 'call ' . join( " ", @exifToolArgs );
-	close( $jsonBatFH );
+		close( $jsonBatFH );
+	}
 	#open/close 'exiftool' args file with arguments written to it
 	toLog( 'update_ID3_tags', "   - Creating argument file for 'exiftool': '" . $exifToolArgsFile . "'\n" );
-	openL ( \$argsFH, '>:encoding(UTF-8)', $exifToolArgsFile ) or badExit( 'update_ID3_tags', "Not able to create temporary arguments file to run 'exiftool': '" . $exifToolArgsFile . "'" );
-		$oldFH = select $argsFH; $| = 1; select $oldFH;
+	openL ( \$argsFH, '>:encoding(UTF-8)', $exifToolArgsFile );
+	if ( ! fileno( $argsFH ) ) {
+		my $argsSysErr = decode( $Config{enc_to_system} || 'UTF-8', $! );
+		my $argsEvalErr = decode( $Config{enc_to_system} || 'UTF-8', $@ );
+		badExit( 'update_ID3_tags', "Not able to create temporary arguments file to run 'exiftool': '" . $exifToolArgsFile . "', returned:\n" . $argsSysErr . "\nand:\n" . $argsEvalErr );
+	} else {
+		my $oldFH = select $argsFH; $| = 1; select $oldFH;
 		print $argsFH @exifToolFileArgs;
-	close( $argsFH );
+		close( $argsFH );
+	}
 
 	#execute batch file wrapper to call 'exiftool' command batch file
 	toLog( 'update_ID3_tags', "   - Executing batch file for 'exiftool'\n" );
@@ -1095,11 +1420,17 @@ sub extractTags
 		my $ffprobeFH;
 		#open/close batch file with commands written to it
 		toLog( 'update_ID3_tags', "   - Creating 'ffprobe' batch file: '" . $ffprobeBat . "'\n" );
-		openL ( \$ffprobeFH, '>:encoding(UTF-8)', $ffprobeBat ) or badExit( 'update_ID3_tags', "Not able to create temporary batch file to run 'ffprobe': '" . $ffprobeBat . "'" );
+		openL ( \$ffprobeFH, '>:encoding(UTF-8)', $ffprobeBat );
+		if ( ! fileno( $ffprobeFH ) ) {
+			my $ffSysErr = decode( $Config{enc_to_system} || 'UTF-8', $! );
+			my $ffEvalErr = decode( $Config{enc_to_system} || 'UTF-8', $@ );
+			badExit( 'update_ID3_tags', "Not able to create temporary batch file to run 'ffprobe': '" . $ffprobeBat . "', returned:\n" . $ffSysErr . "\nand:\n" . $ffEvalErr );
+		} else {
 			my $oldfh = select $ffprobeFH; $| = 1; select $oldfh;
 			#write empty line to batch file in case of file header conflict
 			print $ffprobeFH "\n" . 'chcp 65001' . "\n" . 'call ' . join( " ", @ffprobeCmd );
-		close( $ffprobeFH );
+			close( $ffprobeFH );
+		}
 	
 		toLog( 'update_ID3_tags', "   - Executing 'ffprobe' batch file\n" );
 		my ( $rawStdErr, $stdErr );
@@ -1216,7 +1547,10 @@ sub writeTags
 		renameL ( $songFilePath . $songFileName, $songFilePath . $tmpSongFileName );
 		sleep 1;
 		if ( ! testL ( 'e', $songFilePath . $tmpSongFileName ) ) {
-			badExit( 'update_ID3_tags', "Not able to rename song file: '" . $songFilePath . $songFileName . "' to temp file: '" . $songFilePath . $tmpSongFileName . "', $!, $^E\n" );
+			my $songSysErr = decode( $Config{enc_to_system} || 'UTF-8', $! );
+			my $songEvalErr = decode( $Config{enc_to_system} || 'UTF-8', $@ );
+			my $songOS_Err = decode( $Config{enc_to_system} || 'UTF-8', $^E );
+			badExit( 'update_ID3_tags', "Not able to rename song file: '" . $songFilePath . $songFileName . "' to temp file: '" . $songFilePath . $tmpSongFileName . "', returned:\n" . $songSysErr . "\nand:\n" . $songEvalErr . "\nand:\n" . $songOS_Err );
 		}
 	}
 
@@ -1282,11 +1616,17 @@ sub writeTags
 	my $ffmpegFH;
 	#open/close batch file with commands written to it
 	toLog( 'update_ID3_tags', "   - Creating batch file with 'ffmpeg' commands: '" . $ffmpegBat . "'\n" );
-	openL ( \$ffmpegFH, '>:encoding(UTF-8)', $ffmpegBat ) or badExit( 'update_ID3_tags', "Not able to create temporary batch file to run 'ffmpeg': '" . $ffmpegBat . "'" );
+	openL ( \$ffmpegFH, '>:encoding(UTF-8)', $ffmpegBat );
+	if ( ! fileno( $ffmpegFH ) ) {
+		my $ffmpegSysErr = decode( $Config{enc_to_system} || 'UTF-8', $! );
+		my $ffmpegEvalErr = decode( $Config{enc_to_system} || 'UTF-8', $@ );
+		badExit( 'update_ID3_tags', "Not able to create temporary batch file to run 'ffmpeg': '" . $ffmpegBat . "', returned:\n" . $ffmpegSysErr . "\nand:\n" . $ffmpegEvalErr );
+	} else {
 		my $prevfh = select $ffmpegFH; $| = 1; select $prevfh;
 		#write empty line to batch file in case of file header conflict
 		print $ffmpegFH "\n" . 'chcp 65001' . "\n" . 'call ' . join( " ", @ffmpeg );
-	close( $ffmpegFH );
+		close( $ffmpegFH );
+	}
 
 	#execute batch file wrapper to call 'ffmpeg' commands batch file
 	toLog( 'update_ID3_tags', "   - Executing batch file for 'ffmpeg'\n" );
@@ -1392,20 +1732,20 @@ sub tkEnd
 
 	#reset buttons
 	$M->{'update'}->configure(
-		-text=>'Update ID3 Tags',
-		-font=>TK_FNT_B,
-		-state=>'normal',
-		-bg=>TK_COLOR_BG,
-		-fg=>TK_COLOR_FG,
-		-activebackground=>TK_COLOR_LGREEN
+		-text							=> 'Update ID3 Tags',
+		-font							=> TK_FNT_B,
+		-state						=> 'normal',
+		-bg								=> TK_COLOR_BG,
+		-fg								=> TK_COLOR_FG,
+		-activebackground => TK_COLOR_LGREEN
 	);
-	$M->{'func2'}->configure(
-		-text=>'Function 2',
-		-font=>TK_FNT_B,
-		-state=>'normal',
-		-bg=>TK_COLOR_BG,
-		-fg=>TK_COLOR_FG,
-		-activebackground=>TK_COLOR_ABG
+	$M->{'renumber'}->configure(
+		-text							=> 'Renumber',
+		-font							=> TK_FNT_B,
+		-state						=> 'normal',
+		-bg								=> TK_COLOR_BG,
+		-fg								=> TK_COLOR_FG,
+		-activebackground => TK_COLOR_ABG
 	);
 
 	$M->{'window'}->update();
@@ -1440,10 +1780,16 @@ sub startLog
 	  	my $dir = getcwdL();
 	    $log = "$dir$FS$progName.log";
 		}
-		openL ( \$funcLogFH, '>:encoding(UTF-8)', $log ) or badExit( $funcName, "Not able to create log file: '" . $log . "'" );
-		#redirect STDERR to log file
-		open STDERR, '>>:encoding(UTF-8)', $log;
-		my $oldfh = select $funcLogFH; $| = 1; select $oldfh;
+		openL ( \$funcLogFH, '>:encoding(UTF-8)', $log );
+		if ( ! fileno( $funcLogFH ) ) {
+			my $funcSysErr = decode( $Config{enc_to_system} || 'UTF-8', $! );
+			my $funcEvalErr = decode( $Config{enc_to_system} || 'UTF-8', $@ );
+			badExit( $funcName, "Not able to create log file: '" . $log . "', returned:\n" . $funcSysErr . "\nand:\n" . $funcEvalErr );
+		} else {
+			#redirect STDERR to log file
+			open STDERR, '>>:encoding(UTF-8)', $log;
+			my $oldfh = select $funcLogFH; $| = 1; select $oldfh;
+		}
 
 		toLog( $funcName, "$Sep\nFunction: $funcName\n\tDate: $timeSt\n$Sep" );
 	} else {
@@ -1453,10 +1799,16 @@ sub startLog
 	  	my $dir = getcwdL();
 	    $log = "$dir$FS$progName.log";
 	  }
-		openL ( \$logFH, '>:encoding(UTF-8)', $log ) or badExit( undef, "Not able to create log file: '" . $log . "'" );
-		#redirect STDERR to log file
-		open STDERR, '>>:encoding(UTF-8)', $log;
-		my $oldfh = select $logFH; $| = 1; select $oldfh;
+		openL ( \$logFH, '>:encoding(UTF-8)', $log );
+		if ( ! fileno( $logFH ) ) {
+			my $logSysErr = decode( $Config{enc_to_system} || 'UTF-8', $! );
+			my $logEvalErr = decode( $Config{enc_to_system} || 'UTF-8', $@ );
+			badExit( undef, "Not able to create log file: '" . $log . "', returned:\n" . $logSysErr . "\nand:\n" . $logEvalErr );
+		} else {
+			#redirect STDERR to log file
+			open STDERR, '>>:encoding(UTF-8)', $log;
+			my $oldfh = select $logFH; $| = 1; select $oldfh;
+		}
 
 		toLog( undef, "$SEP\nTool: $progName\n\tVersion: $Version\n\n\tDate: $timeSt\n$Sep" );
 		toLog( undef, "$progName Process Started\n$Sep\n" );
