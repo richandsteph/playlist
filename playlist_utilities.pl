@@ -41,16 +41,22 @@
 #                                run / added retrieve of calling subroutine for logging functions, etc. / 
 #                                added getSongList() for populating song files discovered in root 'Music' 
 #                                folder
+#         1.4 -  5 Feb 2026	 RAD refactored use of double quotes to single quotes where interpolation is 
+#                                not required / corrected output of path value for make_XML_playlist() / 
+#                                created $Server & $Share for replacement of drive letter in path in 
+#                                make_XML_playlist() / added 4th permission value for umask() / changed 
+#                                '...' to occur in status bar & not in status frame / added comments for 
+#                                all subroutines, including optional/required arguments / corrected 
+#                                duplicate (or missing) file separator in getSongList() / added directory 
+#                                to .m3u filename in make_m3u() for logging purposes
 #
 #
 #   TO-DO:
-#         1) add comments for args in subroutines
-#         2) change double quotes to single quotes when interpreting not required
-#         3) make status bar updates to follow with '...' / make status frame updates to NOT use '...'
+#         1) none
 #
 #**********************************************************************************************************
 
-my $Version = "1.3";
+my $Version = '1.4';
 
 use strict;
 use warnings;
@@ -95,19 +101,22 @@ use constant TK_FNT_BI				=> "-*-{Lucida Sans Unicode}-bold-i-normal-*-12-*";
 use constant TK_FNT_B					=> "-*-{Lucida Sans Unicode}-bold-r-normal-*-12-*";
 use constant TK_FNT_I					=> "-*-{Lucida Sans Unicode}-medium-i-normal-*-12-*";
 
-umask 000;
+umask 0000;
 
 #global variables
-my $FS = '\\';
-my $Sep = "-" x 110;
-my $SEP = "=" x 110;
 my ( $dirName, $fileName, $filePath, $log, $stat );
+my $FS = '\\';
+my $Sep = '-' x 110;
+my $SEP = '=' x 110;
+#specify server\share for replacement of drive letter in path
+my $Server = 'DavisServer_1';
+my $Share = 'Movies_Music_Pics';
 #log file handles for function log vs. main log
 my ( $funcLogFH, $logFH );
-#determine program name
-my $progName = progName();
 #initialize warning hash
 my %warn;
+#determine program name
+my $progName = progName();
 
 #command-line tools for song metadata manipulation
 my $exifToolCmd = 'C:\Strawberry\perl\site\bin\exiftool';
@@ -161,7 +170,7 @@ if ( testL ( 's', $ARGV[0] ) ) {
 	if ( ! testL ( 'd', $dirName ) ) {
 		$dirName = getcwdL();
 	}
-	$filePath = "$dirName$fileName";
+	$filePath = $dirName . $fileName;
 } elsif ( testL ( 'd', $ARGV[0] ) ) {
 	$dirName = $ARGV[0];
 } elsif ( $ARGV[0] ) {
@@ -177,7 +186,9 @@ tkMainWindow();
 MainLoop;
 
 #----------------------------------------------------------------------------------------------------------
-#set array of tags to lowercase keys for easier processing of XML output
+# change keys in hash to lowercase
+# **args:
+#     1 - hash reference
 sub lowerHashCase
 #----------------------------------------------------------------------------------------------------------
 {
@@ -201,11 +212,11 @@ sub lowerHashCase
 }
 
 #----------------------------------------------------------------------------------------------------------
-#convert HH:MM:SS length into seconds
+# convert HH:MM:SS length into seconds
 sub convertLength
 #----------------------------------------------------------------------------------------------------------
 {
-    my @time_parts = reverse( split( ":", $_[0] ) );
+    my @time_parts = reverse( split( ':', $_[0] ) );
     my $accum = 0;
     for ( my $i = 0; $i < @time_parts; $i++ ) {
         $accum += $time_parts[$i] * 60 ** $i;
@@ -214,6 +225,7 @@ sub convertLength
 }
 
 #----------------------------------------------------------------------------------------------------------
+# create date & time in readable format
 sub dateTime
 #----------------------------------------------------------------------------------------------------------
 {
@@ -225,8 +237,8 @@ sub dateTime
 	( undef, $min, $hr, $day, $monNum, $yr ) = localtime( time() );
 
 	#modify for output
-	my $mon = ( "Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec" )[$monNum];
-	$min = sprintf( "%02d",$min );
+	my $mon = ( 'Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec' )[$monNum];
+	$min = sprintf( "%02d", $min );
 	if ( $hr > 12 ) {
 		$hr = $hr - 12;
 		$tod = 'pm';
@@ -243,7 +255,7 @@ sub dateTime
 }
 
 #----------------------------------------------------------------------------------------------------------
-#return the name of the program currently running
+# return the name of the program currently running
 sub progName
 #----------------------------------------------------------------------------------------------------------
 {
@@ -259,7 +271,7 @@ sub progName
 }
 
 #----------------------------------------------------------------------------------------------------------
-# read directory and returns a list of XML files
+# read directory and return a list of XML files [$dirName must be populated globally]
 sub getXML_List
 #----------------------------------------------------------------------------------------------------------
 {
@@ -269,7 +281,7 @@ sub getXML_List
 	my ( $package, $file, $line, $subName ) = caller( 1 );
 	$subName =~ s#main::##;
 
-	updStatus( 'Building list of XML files...' );
+	updStatus( 'Building list of XML files' );
 
 	my $dir = Win32::LongPath->new();
 	$dir->opendirL ( $dirName );
@@ -296,7 +308,10 @@ sub getXML_List
 }
 
 #----------------------------------------------------------------------------------------------------------
-# get song list from working directory
+# read directory & recurse subdirectories to return a list of song file
+# **args:
+#     1 - array reference for song file list
+#     2 - directory to crawl
 sub getSongList
 #----------------------------------------------------------------------------------------------------------
 {
@@ -309,7 +324,7 @@ sub getSongList
 	my ( $package, $file, $line, $subName ) = caller( 1 );
 	$subName =~ s#main::##;
 
-	updStatus( 'Building list of song files...' );
+	updStatus( 'Building list of song files' );
 
 	my $dir = Win32::LongPath->new();
 	$dir->opendirL ( $workingDir );
@@ -324,12 +339,12 @@ sub getSongList
 
 		#send notice of folder processing to console
 		my $conFH = select STDOUT; $| = 1; select $conFH;
-		print ".";
+		print '.';
 
-		my $dirItemPath = $workingDir . $FS . $dirItem;
+		my $dirItemPath = $workingDir . $dirItem;
 
 		if ( testL ( 'd', $dirItemPath ) ) {
-			getSongList( $songArrayRef, $dirItemPath );
+			getSongList( $songArrayRef, $dirItemPath . $FS);
 			next;
 		} elsif ( $dirItem =~ m#\.(aac|alac|flac|m4a|mka|mkv|mp3|ogg|wma)$#i ) {
 			push @{$songArrayRef}, $dirItemPath;
@@ -344,6 +359,7 @@ sub getSongList
 }
 
 #----------------------------------------------------------------------------------------------------------
+# draw main GUI window
 sub tkMainWindow
 #----------------------------------------------------------------------------------------------------------
 {
@@ -405,7 +421,7 @@ sub tkMainWindow
 	);
 	$fileEntry->xview( 'end' );
 	$M->{'select'} = $chooseFile->Button(
-		-text							=> "...",
+		-text							=> '...',
 		-command					=> [ \&tkGetFile, $filePath ],
 		-bg								=> TK_COLOR_BG,
 		-fg								=> TK_COLOR_FG,
@@ -436,7 +452,7 @@ sub tkMainWindow
 	);
 	$dirEntry->xview( 'end' );
 	$M->{'select'} = $chooseDir->Button(
-		-text							=> "...",
+		-text							=> '...',
 		-command					=> [ \&tkGetDir, $dirName ],
 		-bg								=> TK_COLOR_BG,
 		-fg								=> TK_COLOR_FG,
@@ -569,7 +585,7 @@ sub tkMainWindow
 	
 	#output date and time
 	my $now = dateTime();
-	my $mesg = $now->{'date'} . " at " . $now->{'time'};
+	my $mesg = $now->{'date'} . ' at ' . $now->{'time'};
 	updStatus( $mesg, undef );
 	$M->{'window'}->update();
 	
@@ -578,7 +594,10 @@ sub tkMainWindow
 }
 
 #----------------------------------------------------------------------------------------------------------
-#update status in window, 1st arg is current status frame and 2nd arg is current process status bar
+# update status in GUI window
+# **args:
+#     1 - current status frame
+#     2 - current process status bar
 sub updStatus
 #----------------------------------------------------------------------------------------------------------
 {
@@ -589,11 +608,15 @@ sub updStatus
 }
 
 #----------------------------------------------------------------------------------------------------------
-#creates prompt window
+# creates prompt window
 #  -returns user's response (name of button)
 #  -if 1st arg specified as 'warning' or 'error', will display that image and include in window title
 #  -3rd arg, and so forth, create buttons
 #  -3rd arg button has default focus
+# **args:
+#     1 - 'warning' or 'error', to display icon (opt) [pass 'undef' if not using]
+#     2 - text for prompt window
+#     3 - array of buttons for answer to prompt (opt) [if not passed, 'OK' will be single button]
 sub promptUser
 #----------------------------------------------------------------------------------------------------------
 {
@@ -644,7 +667,9 @@ sub promptUser
 }
 
 #----------------------------------------------------------------------------------------------------------
-#user chooses directory
+# GUI directory selection
+# **args:
+#     1 - initial directory selection (opt)
 sub tkGetDir
 #----------------------------------------------------------------------------------------------------------
 {
@@ -668,7 +693,9 @@ sub tkGetDir
 }
 
 #----------------------------------------------------------------------------------------------------------
-#user chooses file
+# GUI file selection
+# **args:
+#     1 - initial file & directory selection (opt)
 sub tkGetFile
 #----------------------------------------------------------------------------------------------------------
 {
@@ -698,14 +725,16 @@ sub tkGetFile
 }
 
 #----------------------------------------------------------------------------------------------------------
-#function to create XML playlist from selected root music folder, crawls all artist/album folders in root
+# update GUI & create XML playlist from selected root 'Music' folder, crawls all artist/album subfolders, 
+#   calls command-line utility for extraction based on song file type
+#  - $dirName must be populated globally (user directory selection in GUI)
 sub make_XML_playlist
 #----------------------------------------------------------------------------------------------------------
 {
 	#determine subroutine
 	my ( $package, $file, $line, $subName ) = caller( 0 );
 	$subName =~ s#main::##;
-	updStatus( undef, 'Make XML Playlist' );
+	updStatus( undef, 'Make XML Playlist...' );
 
 	#must specify directory or file
 	unless ( $dirName ) {
@@ -760,14 +789,14 @@ sub make_XML_playlist
 	my @songList;
 	getSongList( \@songList, $dirName );
 	
-	toLog( $subName, "----\n...Processing Song Files in: $dirName\n\n" );
+	toLog( $subName, "====\n...Processing Song Files in: $dirName\n\n" );
 	
 	#parse out XML node data from songs to XML file
-	updStatus( 'Creating XML document...' );
+	updStatus( 'Creating XML document' );
 	my $writer = XML::Writer->new( OUTPUT => 'self', DATA_MODE => 1, DATA_INDENT => 2, UNSAFE => 1 );
-	badExit( $subName, "Not able to create new XML::Writer object" ) if ( ! $writer );
+	badExit( $subName, 'Not able to create new XML::Writer object' ) if ( ! $writer );
 	#write XML Declaration
-	$writer->xmlDecl( "UTF-8" ) or badExit( $subName, "Not able to write out XML Declaration" );
+	$writer->xmlDecl( 'UTF-8' ) or badExit( $subName, "Not able to write out XML Declaration" );
 	#determine playlist name
 	my $playlist_name;
 	if ( $dirName =~ m#phone_music#i ) {
@@ -777,8 +806,8 @@ sub make_XML_playlist
 	}
 	#write date into <playlist> tag attribute
 	my $now = dateTime();
-	my $today = $now->{'date'} . " at " . $now->{'time'};
-	$writer->startTag( "playlist", name => $playlist_name, date => $today );
+	my $today = $now->{'date'} . ' at ' . $now->{'time'};
+	$writer->startTag( 'playlist', name => $playlist_name, date => $today );
 	
 	#start process to create batch file for calling 'chcp 65001' for files/folders with Unicode characters
 	my $statBat = $ENV{TEMP} . $FS . 'stat.bat';
@@ -823,11 +852,11 @@ sub make_XML_playlist
 		#echo status to console
 		my $songFileName;
 		( $songFileName ) = fileparse( abspathL ( $songFile ) );
-		toLog( $subName, "Processing song no. " . $num . ": '" . $songFile . "'\n" );
-		updStatus( "Processing song no. " . $num . " ..." );
+		toLog( $subName, 'Processing song no. ' . $num . ": '" . $songFile . "'\n" );
+		updStatus( 'Processing song no. ' . $num );
 		binmode( STDOUT, ":encoding(UTF-8)" );
 		print "\n" if ( $num == 1 );
-		print "   - processing song no. " . $num . ": '" . $songFileName . "'\n";
+		print '   - processing song no. ' . $num . ": '" . $songFileName . "'\n";
 	
 		#set per song hash for tag metadata
 		my %tags;
@@ -856,93 +885,93 @@ sub make_XML_playlist
 		}
 
 		#write out XML to file of metadata for song file
-		toLog( $subName, " - Writing out XML to list\n" );
+		toLog( $subName, "   - Writing out XML to list\n" );
 		#build and output new playlist song node
-		$writer->startTag( "song", number => $num );
+		$writer->startTag( 'song', number => $num );
 		#write <track>
 		#strip leading '0' in 'Discnumber' tag
 		if ( $tags{discnumber} =~ m#^0(.+)$# ) {
 			$tags{discnumber} = $1;
 		}
-		$writer->startTag( "track", discnumber => $tags{discnumber} );
+		$writer->startTag( 'track', discnumber => $tags{discnumber} );
 		#padding with '0' in 'track' tag
 		if ( $tags{track} =~ m#^\d$# ) {
 			$tags{track} = '0' . $tags{track};
 		}
 		$writer->characters( $tags{track} ) if ( $tags{track} );
-		$writer->endTag( "track" );
+		$writer->endTag( 'track' );
 		#write <title>
-		$writer->startTag( "title" );
+		$writer->startTag( 'title' );
 		#replace extraneous characters
 		$writer->characters( $tags{title} ) if ( $tags{title} );
-		$writer->endTag( "title" );
+		$writer->endTag( 'title' );
 		#write <artist>
-		$writer->startTag( "artist" );
+		$writer->startTag( 'artist' );
 		#replace extraneous characters
 		$writer->characters( $tags{artist} ) if ( $tags{artist} );
-		$writer->endTag( "artist" );
+		$writer->endTag( 'artist' );
 		#write <albumartist>
-		$writer->startTag( "albumartist" );
+		$writer->startTag( 'albumartist' );
 		#replace extraneous characters
 		$writer->characters( $tags{albumartist} ) if ( $tags{albumartist} );
-		$writer->endTag( "albumartist" );
+		$writer->endTag( 'albumartist' );
 		#write <album>
-		$writer->startTag( "album" );
+		$writer->startTag( 'album' );
 		#replace extraneous characters
 		$writer->characters( $tags{album} ) if ( $tags{album} );
-		$writer->endTag( "album" );
+		$writer->endTag( 'album' );
 		#write <year>
-		$writer->startTag( "year" );
+		$writer->startTag( 'year' );
 		$writer->characters( $tags{year} ) if ( $tags{date} );
-		$writer->endTag( "year" );
+		$writer->endTag( 'year' );
 		#write <genre>
-		$writer->startTag( "genre" );
+		$writer->startTag( 'genre' );
 		#replace extraneous characters
 		$writer->characters( $tags{genre} ) if ( $tags{genre} );
-		$writer->endTag( "genre" );
+		$writer->endTag( 'genre' );
 		#write <bitrate>
-		$writer->startTag( "bitrate", unit => 'kbps' );
+		$writer->startTag( 'bitrate', unit => 'kbps' );
 		$writer->characters( $tags{bitrate} ) if ( $tags{bitrate} );
-		$writer->endTag( "bitrate" );
+		$writer->endTag( 'bitrate' );
 		#write <length>
 		if ( $tags{minutes} ) {
-			$writer->startTag( "length", minutes => $tags{minutes} );
+			$writer->startTag( 'length', minutes => $tags{minutes} );
 		} else {
-			$writer->startTag( "length", minutes => '' );
+			$writer->startTag( 'length', minutes => '' );
 		}
 		$writer->characters( $tags{length} ) if ( $tags{length} );
-		$writer->endTag( "length" );
+		$writer->endTag( 'length' );
 		#write <comment>
-		$writer->startTag( "comment" );
+		$writer->startTag( 'comment' );
 		#replace extraneous characters
 		$writer->characters( $tags{comment} ) if ( $tags{comment} );
-		$writer->endTag( "comment" );
+		$writer->endTag( 'comment' );
 		#replace extraneous characters for adding <path> content
-		my $songFileClean;
+		my $songFileClean = $songFile;
 		#clean up path
-		if ( $songFileClean =~ s#^[A-Za-z]:[\\\/]#\\\\DavisServer_1\\Movies_Music_Pics\\#i ) {
+		if ( $songFileClean =~ s#^[A-Za-z]:[\/\\]#\\\\$Server\\$Share\\#i ) {
 			#replace 'M:\' drive letter path with UNC path
-			toLog( $subName, " - Replacing drive letter with UNC path\n" );
+			toLog( $subName, "   - Replacing drive letter with UNC path\n" );
 			#replace any remaining forward slashes with backslashes
 			$songFileClean =~ s#\/#$FS#g;
 		}
 		#write <path>
-		$writer->startTag( "path" );
+		$writer->startTag( 'path' );
 		$writer->characters( $songFileClean );
-		$writer->endTag( "path" );
+		$writer->endTag( 'path' );
 	
 		#write out close song XML tag
-		$writer->endTag( "song" );
+		$writer->endTag( 'song' );
 	
-		toLog( $subName, "Writing \"" . $tags{title} . "\" by \"" . $tags{artist} . "\" as number $num to playlist XML file\n" );
+		toLog( $subName, "  Writing \"" . $tags{title} . "\" by \"" . $tags{artist} . "\" as number $num to playlist XML file\n" );
 	}
 	
 	#write out close playlist XML tag
-	$writer->endTag( "playlist" );
-	$writer->end() or badExit( $subName, "Not able to write complete XML to file" );
+	$writer->endTag( 'playlist' );
+	$writer->end() or badExit( $subName, 'Not able to write complete XML to file' );
 	
 	#write out new XML playlist file
-	my $playlistXmlFile = "$dirName$playlist_name.xml";
+	my $playlistXmlFile = $dirName . $playlist_name . '.xml';
 	my $xmlOutFH;
 	openL ( \$xmlOutFH, '>:encoding(UTF-8)', $playlistXmlFile );
 	if ( ! fileno( $xmlOutFH ) ) {
@@ -976,16 +1005,17 @@ sub make_XML_playlist
 }
 
 #----------------------------------------------------------------------------------------------------------
-#function to create .m3u playlist from XML playlist, can search through directories from selected root or 
-#  accept passed file
+# update GUI & create .m3u playlist from XML playlist
+#  - runs on single XML playlist file, when $fileName populated (1st priority)
+#  - gathers XML playlist files in selected directory, when $dirName populated
 sub make_m3u
 #----------------------------------------------------------------------------------------------------------
 {
 	#determine subroutine
 	my ( $package, $file, $line, $subName ) = caller( 0 );
 	$subName =~ s#main::##;
-	updStatus( undef, 'Make .m3u Playlist' );
-	updStatus( "Making .m3u playlist..." );
+	updStatus( undef, 'Make .m3u Playlist...' );
+	updStatus( 'Making .m3u playlist' );
 
 	#must specify directory or file
 	unless ( $dirName || $fileName ) {
@@ -1042,7 +1072,7 @@ sub make_m3u
 		if ( $fileName =~ m#\.xml$#i ) {
 			push @fileList, $filePath;
 		} else {
-			promptUser( 'warning', "Selected file is not an XML instance" );
+			promptUser( 'warning', 'Selected file is not an XML instance' );
 			toLog( $subName, "File selected is not an XML instance, ending '" . $subName . "' function\n\n" );
 			tkEnd( $subName );
 			return;
@@ -1055,7 +1085,7 @@ sub make_m3u
 	my $m3uFileName;
 	foreach my $xmlFile ( @fileList ) {
 		toLog( $subName, "...Processing XML file: '$xmlFile'\n\n" );
-		updStatus( "Processing XML file: '" . $xmlFile . "' ..." );
+		updStatus( "Processing XML file: '" . $xmlFile . "'" );
 		#echo status to console
 		binmode( STDOUT, ":encoding(UTF-8)" );
 		print "\n   Processing '$xmlFile'\n";
@@ -1089,11 +1119,11 @@ sub make_m3u
 			$m3uFileName =~ s#\.\w\w\w?$##;
 		}
 		$m3uData .= "$m3uFileName\n";
-		updStatus( "Creating .m3u playlist: '" . $m3uFileName . "' ..." );
+		updStatus( "Creating .m3u playlist: '" . $m3uFileName . "'" );
 
 		toLog( $subName, "Setting date/time for playlist\n" );
 		my $now = dateTime();
-		my $today = $now->{'date'} . " at " . $now->{'time'};
+		my $today = $now->{'date'} . ' at ' . $now->{'time'};
 		$m3uData .= '#EXTINF:DATE - ' . $today . "\n";
 	
 		#create hashes of sorted data for output / title, artist, & song number for logging
@@ -1124,20 +1154,21 @@ sub make_m3u
 	
 		#write out new .m3u playlist file
 		my $m3uFH;
-		my $m3uFile = $xmlFile;
+		my ( $m3uFile, $m3uFilePath );
 		$m3uFile = $m3uFileName . '.m3u';
-		openL ( \$m3uFH, '>:encoding(UTF-8)', $m3uFile );
+		$m3uFilePath = $dirName . $m3uFile;
+		openL ( \$m3uFH, '>:encoding(UTF-8)', $m3uFilePath );
 		if ( ! fileno( $m3uFH ) ) {
 			my $m3uSysErr = decode( $Config{enc_to_system} || 'UTF-8', $! );
 			my $m3uOS_Err = decode( $Config{enc_to_system} || 'UTF-8', $^E );
-			badExit( $subName, "Not able to create '" . $m3uFile . "', returned:\n" . $m3uSysErr . "\nand:\n" . $m3uOS_Err );
+			badExit( $subName, "Not able to create '" . $m3uFilePath . "', returned:\n" . $m3uSysErr . "\nand:\n" . $m3uOS_Err );
 		} else {
 			my $oldfh = select $m3uFH; $| = 1; select $oldfh;
 			print $m3uFH $m3uData;
 			close( $m3uFH );
 		}
 
-		toLog( $subName, "\n...Made .m3u Playlist: '" . $m3uFile . "'\n\n\n" );
+		toLog( $subName, "\n...Made .m3u Playlist: '" . $m3uFilePath . "'\n\n\n" );
 		toLog( $subName, " *WARNING*: There were " . $warn{make_m3u} . " warning(s) for process...\n\n\n" ) if ( $warn{make_m3u} );
 		toLog( undef, "  ...Finished Making .m3u Playlist from: '" . $xmlFile . "'\n\n" );
 		#echo status to console
@@ -1158,15 +1189,16 @@ sub make_m3u
 }
 
 #----------------------------------------------------------------------------------------------------------
-#function to renumber XML nodes in single selected XML playlist, or all XML instances in selected root 
-#  folder
+# update GUI & renumber XML nodes in selected XML playlist file(s) or directory of XML playlist file(s)
+#  - runs on single XML playlist file, when $fileName populated (1st priority)
+#  - gathers XML playlist files in selected directory, when $dirName populated
 sub renumber
 #----------------------------------------------------------------------------------------------------------
 {
 	#determine subroutine
 	my ( $package, $file, $line, $subName ) = caller( 0 );
 	$subName =~ s#main::##;
-	updStatus( undef, 'Renumber' );
+	updStatus( undef, 'Renumber...' );
 
 	#must specify directory or file
 	unless ( $dirName || $fileName ) {
@@ -1216,7 +1248,7 @@ sub renumber
 	#starting log process
 	toLog( undef, "  Renumbering...\n    See '" . $dirName . $subName . ".log' for details\n\n" );
 	startLog( $subName );
-	updStatus( "Renumbering XML files in '" . $dirName . "' ..." );
+	updStatus( "Renumbering XML files in '" . $dirName . "'" );
 	
 	#retrieve list of XML files in $dirName, unless file is selected - just push single item into array
 	my @fileList;
@@ -1224,7 +1256,7 @@ sub renumber
 		if ( $fileName =~ m#\.xml$#i ) {
 			push @fileList, $filePath;
 		} else {
-			promptUser( 'warning', "Selected file is not an XML instance" );
+			promptUser( 'warning', 'Selected file is not an XML instance' );
 			toLog( $subName, "File selected is not an XML instance, ending 'renumber' function\n\n" );
 			tkEnd( $subName );
 			return;
@@ -1236,7 +1268,7 @@ sub renumber
 	#loop through each XML file in directory
 	foreach my $xmlFile ( @fileList ) {
 		toLog( $subName, "...Processing XML File: '$xmlFile'\n\n" );
-		updStatus( "Processing XML file: '" . $xmlFile . "' ..." );
+		updStatus( "Processing XML file: '" . $xmlFile . "'" );
 		#echo status to console
 		binmode( STDOUT, ":encoding(UTF-8)" );
 		print "\n   Renumbering '$xmlFile'\n";
@@ -1268,8 +1300,8 @@ sub renumber
 			badExit( $subName, "Not able to create new XML::Writer object, returned:\n" . $writeSysErr . "and:\n" . $writeEvalErr );
 		} else {
 			#write XML Declaration
-			$writer->xmlDecl( "UTF-8" ) or badExit( $subName, "Not able to write out XML Declaration" );
-			$writer->comment( "*IMPORTANT*: Only 1 attribute/value pair is allowed per each child node of <song>" );
+			$writer->xmlDecl( 'UTF-8' ) or badExit( $subName, 'Not able to write out XML Declaration' );
+			$writer->comment( '*IMPORTANT*: Only 1 attribute/value pair is allowed per each child node of <song>' );
 		}
 		
 		#cycle through number nodes
@@ -1280,8 +1312,8 @@ sub renumber
 		#get playlist @name for writing out
 		my @playlistName = $dom->findvalue( '/playlist/@name' );
 		my $now = dateTime();
-		my $today = $now->{'date'} . " at " . $now->{'time'};
-		$writer->startTag( "playlist", name => $playlistName[0], date => $today );
+		my $today = $now->{'date'} . ' at ' . $now->{'time'};
+		$writer->startTag( 'playlist', name => $playlistName[0], date => $today );
 	
 		my %title;
 	
@@ -1295,10 +1327,10 @@ sub renumber
 				#change @number to new $nodeCnt
 				toLog( $subName, "\tNode content changed from: $numberVal to $nodeCnt\n" );
 				#write out XML 'song' element
-				$writer->startTag( "song", number => $nodeCnt );
+				$writer->startTag( 'song', number => $nodeCnt );
 			} else {
 				#write out XML 'song' element
-				$writer->startTag( "song", number => $numberVal );
+				$writer->startTag( 'song', number => $numberVal );
 			}
 	
 			#search empty elements and add empty node to avoid collapsed tag output
@@ -1342,11 +1374,11 @@ sub renumber
 				$writer->endTag( $nodeName );
 			}
 			#write out close 'song' XML tag
-			$writer->endTag( "song" );
+			$writer->endTag( 'song' );
 		}
 			#write out close 'playlist' XML tag
-		$writer->endTag( "playlist" );
-		$writer->end() or badExit( $subName, "Not able to end XML document" );
+		$writer->endTag( 'playlist' );
+		$writer->end() or badExit( $subName, 'Not able to end XML document' );
 	
 		#write out renumbered XML playlist file
 		my $xmlOutFH;
@@ -1381,14 +1413,16 @@ sub renumber
 }
 
 #----------------------------------------------------------------------------------------------------------
-#function to update ID3 metadata with XML input for song files
+# update GUI & update ID3 metadata in song files with XML input from XML playlist file, calls command-line 
+#   utility for orignial extraction based on song file type
+#  - $fileName must be populated globally (user file selection in GUI)
 sub update_ID3_tags
 #----------------------------------------------------------------------------------------------------------
 {
 	#determine subroutine
 	my ( $package, $file, $line, $subName ) = caller( 0 );
 	$subName =~ s#main::##;
-	updStatus( undef, 'Update ID3 Tags' );
+	updStatus( undef, 'Update ID3 Tags...' );
 
 	#must specify file or directory
 	unless ( $filePath ) {
@@ -1438,13 +1472,13 @@ sub update_ID3_tags
 	#starting log process
 	toLog( undef, "  Updating ID3 Tags:\n    See '" . $dirName . $subName . ".log' for details\n\n" );
 	startLog( $subName );
-	updStatus( "Updating ID3 tags in '" . $dirName . "' ..." );
+	updStatus( "Updating ID3 tags in '" . $dirName . "'" );
 	
 	#separate out playlist XML filename and directory
 	my ( $playlistFilename, $playlistFilePath ) = fileparse( abspathL ( $filePath ) );
 	$playlistFilename =~ s#\.\w\w\w?$##;
 	#echo status to console
-	toLog( $subName, 'Processing playlist XML file: "' . $playlistFilename . ".xml\"...\n" );
+	toLog( $subName, "Processing playlist XML file: '" . $playlistFilename . ".xml'...\n" );
 	binmode( STDOUT, ":encoding(UTF-8)" );
 	print "\n   Processing '$playlistFilename.xml'\n";
 	
@@ -1458,7 +1492,7 @@ sub update_ID3_tags
 	} else {
 		binmode $xmlFH;
 		$dom = XML::LibXML->load_xml( IO => $xmlFH );
-		badExit( $subName, "Couldn't load playlist XML file: $playlistFilename.xml" ) unless ( $dom );
+		badExit( $subName, "Couldn't load playlist XML file: '" . $playlistFilename . ".xml'" ) unless ( $dom );
 	}
 	
 	#determine playlist name
@@ -1472,15 +1506,15 @@ sub update_ID3_tags
 	#set output object for playlist XML
 	toLog( $subName, "- Initializing XML playlist\n" );
 	my $writer = XML::Writer->new( OUTPUT => 'self', DATA_MODE => 1, DATA_INDENT => 2, UNSAFE => 1 );
-	badExit( $subName, "Not able to create new XML::Writer object" ) if ( ! $writer );
+	badExit( $subName, 'Not able to create new XML::Writer object' ) if ( ! $writer );
 	#write XML Declaration
-	$writer->xmlDecl( "UTF-8" ) or badExit( $subName, "Not able to write out XML Declaration" );
-	$writer->comment( "*IMPORTANT*: Only 1 attribute/value pair is allowed per each child node of <song>" );
+	$writer->xmlDecl( 'UTF-8' ) or badExit( $subName, 'Not able to write out XML Declaration' );
+	$writer->comment( '*IMPORTANT*: Only 1 attribute/value pair is allowed per each child node of <song>' );
 	#write date into root <playlist> tag attribute, with playlist name as attribute
 	toLog( $subName, "- Setting date/time for playlist\n" );
 	my $now = dateTime();
-	my $today = $now->{'date'} . " at " . $now->{'time'};
-	$writer->startTag( "playlist", name => $playlistName, date => $today );
+	my $today = $now->{'date'} . ' at ' . $now->{'time'};
+	$writer->startTag( 'playlist', name => $playlistName, date => $today );
 	
 	#set overall counter for songs
 	my $num = 0;
@@ -1488,7 +1522,7 @@ sub update_ID3_tags
 	foreach my $songNode ( $dom->findnodes( '//song' ) ) {
 		++$num;
 
-		updStatus( "Processing song no. " . $num . " ..." );
+		updStatus( 'Processing song no. ' . $num );
 
 		#set per song hash for tag metadata
 		my ( %tags, $songFile, $songFileName, $songFilePath );
@@ -1505,13 +1539,13 @@ sub update_ID3_tags
 				$songFile = $nodeContent if ( $nodeContent );
 				( $songFileName ) = fileparse( abspathL ( $songFile ) );
 				if ( testL ( 'e', $songFile ) ) {
-					toLog( $subName, "...Processing song no. " . $num . ": '" . $songFile . "'\n" );
+					toLog( $subName, '...Processing song no. ' . $num . ": '" . $songFile . "'\n" );
 					binmode( STDOUT, ":encoding(UTF-8)" );
-					print "     - processing song no. " . $num . ": '" . $songFileName . "'\n";
+					print '     - processing song no. ' . $num . ": '" . $songFileName . "'\n";
 				} else {
 					binmode( STDOUT, ":encoding(UTF-8)" );
-					print "    Song no. " . $num . " : '" . $songFileName . "' does not exist\n";
-					warning( $subName, "Song no. " . $num . " : '" . $songFile . "' does not exist" );
+					print '    Song no. ' . $num . " : '" . $songFileName . "' does not exist\n";
+					warning( $subName, 'Song no. ' . $num . " : '" . $songFile . "' does not exist" );
 					tkEnd( $subName );
 					return();
 				}
@@ -1556,7 +1590,7 @@ sub update_ID3_tags
 		foreach my $tag ( @listOfXmlTags ) {
 			if ( ! $tags{$tag} ) {
 				#remove empty hash elements, so they don't get removed by 'ffmpeg'
-				toLog( $subName, "     - '$tag' tag is not declared, removing key from hash\n" );
+				toLog( $subName, "     - '" . $tag . "' tag is not declared, removing key from hash\n" );
 				delete $tags{$tag};
 			}
 		}
@@ -1566,7 +1600,7 @@ sub update_ID3_tags
 	}
 	
 	#write out close playlist XML tag
-	$writer->endTag( "playlist" );
+	$writer->endTag( 'playlist' );
 	$writer->end() or badExit( $subName, "Not able to write end() XML instance to \$writer object" );
 	
 	#write out new playlist XML
@@ -1583,19 +1617,24 @@ sub update_ID3_tags
 	}
 
 	toLog( $subName, "\n...Created Updated Playlist XML file: '" . $filePath . "'\n\n\n" );
-	toLog( $subName, " *WARNING*: There were " . $warn{update_ID3_tags} . " warning(s) for process...\n\n\n" ) if ( $warn{update_ID3_tags} );
+	toLog( $subName, ' *WARNING*: There were ' . $warn{update_ID3_tags} . " warning(s) for process...\n\n\n" ) if ( $warn{update_ID3_tags} );
 	toLog( undef, "  ...Finished Updating ID3 Tags for XML in: '" . $dirName . "'\n\n" );
 	#echo status to console
 	binmode( STDOUT, ":encoding(UTF-8)" );
 	print "   Finished Updating ID3 Tags '" . $fileName . "'\n";
 
 	#process end
-	updStatus( "Finished Updating ID3 Tags \"" . $fileName . "\"" );
+	updStatus( "Finished Updating ID3 Tags '" . $fileName . "'" );
 	tkEnd( $subName );
 }
 
 #----------------------------------------------------------------------------------------------------------
-#method to edit metadata for .mkv song file types
+# extract metadata from song file for .mkv song file type, uses 'mkvextract' command-line utility for 
+#   extraction
+# **args:
+#     1 - number of current song file
+#     2 - tags hash reference
+#     3 - song file to be run on
 sub mkvTools
 #----------------------------------------------------------------------------------------------------------
 {
@@ -1604,7 +1643,7 @@ sub mkvTools
 	my ( $package, $file, $line, $subName ) = caller( 1 );
 	$subName =~ s#main::##;
 	toLog( $subName, "   - Preparing for 'mkvextract' to export metadata tags from song file\n" );
-	updStatus( "Running 'mkvextract' to export metadata..." );
+	updStatus( "Running 'mkvextract' to export metadata" );
 
 	my $songFileXml = $songFile . '.xml';
 	my @mkvArgs = (
@@ -1630,7 +1669,7 @@ sub mkvTools
 		badExit( $subName, "Not able to create temporary batch file to run 'mkvextract': '" . $mkvBat . "', returned:\n" . $mkvSysErr . "\nand:\n" . $mkvOS_Err );
 	} else {
 		my $oldFH = select $mkvBatFH; $| = 1; select $oldFH;
-		print $mkvBatFH "\n" . 'chcp 65001' . "\n" . 'call ' . join( " ", @mkvArgs );
+		print $mkvBatFH "\n" . 'chcp 65001' . "\n" . 'call ' . join( ' ', @mkvArgs );
 		close( $mkvBatFH );
 }
 
@@ -1680,7 +1719,11 @@ sub mkvTools
 }
 
 #----------------------------------------------------------------------------------------------------------
-#method to edit metadata for all other song file types
+# generic extract metadata from song file, calls 'exifTool' command-line utility for extraction
+# **args:
+#     1 - number of current song file
+#     2 - tags hash reference
+#     3 - song file to be run on
 sub exifTools
 #----------------------------------------------------------------------------------------------------------
 {
@@ -1689,7 +1732,7 @@ sub exifTools
 	my ( $package, $file, $line, $subName ) = caller( 1 );
 	$subName =~ s#main::##;
 	toLog( $subName, "   - Preparing for 'ExifTool' to export metadata tags from song file\n" );
-	updStatus( "Running 'exifTool' to export metadata..." );
+	updStatus( "Running 'exifTool' to export metadata" );
 
 	#arguments for calling 'exiftool' command-line program
 	my $exifToolArgsFile = $ENV{TEMP} . $FS . 'exiftoolargs-' . $num . '.txt';
@@ -1732,7 +1775,7 @@ sub exifTools
 		badExit( $subName, "Not able to create temporary batch file to run 'exiftool': '" . $jsonBat . "', returned:\n" . $jsonSysErr . "\nand:\n" . $jsonOS_Err );
 	} else {
 		my $oldFH = select $jsonBatFH; $| = 1; select $oldFH;
-		print $jsonBatFH "\n" . 'chcp 65001' . "\n" . 'call ' . join( " ", @exifToolArgs );
+		print $jsonBatFH "\n" . 'chcp 65001' . "\n" . 'call ' . join( ' ', @exifToolArgs );
 		close( $jsonBatFH );
 	}
 	#open/close 'exiftool' args file with arguments written to it
@@ -1789,7 +1832,10 @@ sub exifTools
 }
 
 #----------------------------------------------------------------------------------------------------------
-#checking each tag - to set/clean-up values and/or delete values
+# check each tag in hash - to set/clean-up values and/or modify/delete values
+# **args:
+#     1 - tags hash reference
+#     2 - song file to be run on
 sub cleanTags
 #----------------------------------------------------------------------------------------------------------
 {
@@ -1798,7 +1844,7 @@ sub cleanTags
 	my ( $package, $file, $line, $subName ) = caller( 1 );
 	$subName =~ s#main::##;
 	toLog( $subName, "   - Examining each tag retrieved\n" );
-	updStatus( "Cleaning up metadata tags..." );
+	updStatus( 'Cleaning up metadata tags' );
 
 	#loop through array of arrays for possible tags to clean/set tag's value
 	for my $tagsRow ( 0 .. $#listOfTagArrays ) {
@@ -1927,7 +1973,7 @@ sub cleanTags
 				if ( $tagsRef->{$key} =~ m#\(approx\)#i ) {
 						$tagsRef->{$key} =~ s#^(.+)\s*\(approx\)\s*$#$1#i;
 				} elsif ( $tagsRef->{$key} =~ m#^0\.# ) {
-					undef $tagsRef->{$key};#-x-  0.06 s
+					undef $tagsRef->{$key};
 				}
 				#remove 'duration'
 				delete $tagsRef->{duration};
@@ -1967,6 +2013,12 @@ sub cleanTags
 }
 
 #----------------------------------------------------------------------------------------------------------
+# extract metadata from song file path, when song file does not have complete metadata (calls 'ffprobe' 
+#   command-line utility when length is not present)
+# **args:
+#     1 - number of current song file
+#     2 - tags hash reference
+#     3 - song file to be run on
 sub extractTags
 #----------------------------------------------------------------------------------------------------------
 {
@@ -1978,7 +2030,7 @@ sub extractTags
 
 
 	my ( $fileName, $filePath ) = fileparse( abspathL ( $songFile ) );
-	updStatus( "Extracting tags in song: '" . $fileName . "'" );
+	updStatus( "Extracting tags in: '" . $fileName . "'" );
 
 	#determine values from path of song file, using expected 'Music' directory
 	if ( $filePath =~ m#\\Music\\([^\\]+)\\([^\\]+)\\#i ) {
@@ -2048,7 +2100,7 @@ sub extractTags
 		} else {
 			my $oldfh = select $ffprobeFH; $| = 1; select $oldfh;
 			#write empty line to batch file in case of file header conflict
-			print $ffprobeFH "\n" . 'chcp 65001' . "\n" . 'call ' . join( " ", @ffprobeArgs );
+			print $ffprobeFH "\n" . 'chcp 65001' . "\n" . 'call ' . join( ' ', @ffprobeArgs );
 			close( $ffprobeFH );
 		}
 	
@@ -2068,7 +2120,7 @@ sub extractTags
 		}
 	
 		if ( ( ! $tagsRef->{title} ) && ( ! $tagsRef->{artist} ) ) {
-			warning( $subName, "Could not determine <title>, <artist>, or possibly other tags" );
+			warning( $subName, 'Could not determine <title>, <artist>, or possibly other tags' );
 		}
 	
 		toLog( $subName, "   - Cleaning up temporary 'ffprobe' files\n" );
@@ -2089,7 +2141,14 @@ sub extractTags
 }
 
 #----------------------------------------------------------------------------------------------------------
-#write tags to metadata of song file, using 'ffmpeg'
+# write metadata to song file & builds song file node for writing to XML playlist, calls 'ffmpeg' command-
+#   line utility
+# **args:
+#     1 - number of current song file
+#     2 - $writer object used to write out XML nodes to XML playlist
+#     3 - tags hash reference
+#     4 - song file to be run on
+#     5 - $songNode object for current song node
 sub writeTags
 #----------------------------------------------------------------------------------------------------------
 {
@@ -2098,12 +2157,12 @@ sub writeTags
 	my ( $package, $file, $line, $subName ) = caller( 1 );
 	$subName =~ s#main::##;
 	toLog( $subName, "   - Writing XML nodes to XML playlist\n" );
-	updStatus( "Writing updated tag metadata to XML playlist..." );
+	updStatus( 'Writing updated tag metadata to XML playlist' );
 
 	#write out tags to XML
 	my $numberVal = $songNode->findvalue( './@number' );
 	#write out XML 'song' element
-	$writer->startTag( "song", number => $numberVal );
+	$writer->startTag( 'song', number => $numberVal );
 
 	#mirror 'subnodes', but in particular order
 	toLog( $subName, "   - Reordering XML nodes\n" );
@@ -2158,7 +2217,7 @@ sub writeTags
 		$writer->endTag( $nodeName );
 	}
 	#write out close 'song' XML tag
-	$writer->endTag( "song" );
+	$writer->endTag( 'song' );
 
 	#prepare file for ffmpeg to write metadata (can't write out to self) - copy original to temp file
 	toLog( $subName, "   - Creating temporary song file for 'ffmpeg' to use as original song file\n" );
@@ -2231,7 +2290,7 @@ sub writeTags
 	);
 	#splice in array of '-metadata' switches into @ffmpeg args
 	splice( @ffmpegArgs, 11, 0, @newMeta );
-	toLog( $subName, "   - System command to rewrite song metadata with 'ffmpeg': '" . join( " ", @ffmpegArgs ) . "'\n" );
+	toLog( $subName, "   - System command to rewrite song metadata with 'ffmpeg': '" . join( ' ', @ffmpegArgs ) . "'\n" );
 
 	#start process to create batch file with 'ffmpeg' commands
 	my $ffmpegBat = $ENV{TEMP} . $FS . 'ffmpeg-' . $num . '.bat';
@@ -2247,7 +2306,7 @@ sub writeTags
 	} else {
 		my $prevfh = select $ffmpegFH; $| = 1; select $prevfh;
 		#write empty line to batch file in case of file header conflict
-		print $ffmpegFH "\n" . 'chcp 65001' . "\n" . 'call ' . join( " ", @ffmpegArgs );
+		print $ffmpegFH "\n" . 'chcp 65001' . "\n" . 'call ' . join( ' ', @ffmpegArgs );
 		close( $ffmpegFH );
 	}
 
@@ -2275,7 +2334,10 @@ sub writeTags
 }
 
 #----------------------------------------------------------------------------------------------------------
-#warning process
+# output & log warning process
+# **args:
+#     1 - function name of calling subroutine (opt) [use 'undef' if global]
+#     2 - warning message
 sub warning
 #----------------------------------------------------------------------------------------------------------
 {
@@ -2288,16 +2350,19 @@ sub warning
 	if ( $funcName ) {
 		#set warn hash for function with increasing warning count
 		++$warn{$funcName};
-		toLog( $funcName, "\n *WARNING* (" . $warn{$funcName} . "): $msg,\n" . shortmess() . "\n" );
+		toLog( $funcName, "\n *WARNING* (" . $warn{$funcName} . "): " . $msg . ",\n" . shortmess() . "\n" );
 	} else {
-		toLog( undef, "\n *WARNING* (" . $warn{global} . "): $msg,\n" . shortmess() . "\n" );
+		toLog( undef, "\n *WARNING* (" . $warn{global} . "): " . $msg . ",\n" . shortmess() . "\n" );
 	}
 
 	promptUser( 'warning', $msg );
 }
 
 #----------------------------------------------------------------------------------------------------------
-#failed execution process
+# output & log failed execution process
+# **args:
+#     1 - function name of calling subroutine (opt) [use 'undef' if global]
+#     2 - error message
 sub badExit
 #----------------------------------------------------------------------------------------------------------
 {
@@ -2310,7 +2375,7 @@ sub badExit
 	my $sysError = decode( $Config{enc_to_system} || 'UTF-8', $rawSysError );
 	my $evalError = decode( $Config{enc_to_system} || 'UTF-8', $rawEvalError );
 	if ( $sysError or $evalError ) {
-	  $error .= "\n\n *Failed with following system error message: $sysError\n *Failed with following eval error message: $evalError";
+	  $error .= "\n\n *Failed with following system error message: " . $sysError . "\n *Failed with following eval error message: " . $evalError;
 	}
 	updStatus( undef, 'ERROR...' );
 
@@ -2340,6 +2405,8 @@ sub badExit
 
 #----------------------------------------------------------------------------------------------------------
 # function ends successfully - log closed and window refreshed for restart
+# **args:
+#     1 - function name of calling subroutine (opt) [use 'undef' if global]
 sub tkEnd
 #----------------------------------------------------------------------------------------------------------
 {
@@ -2348,7 +2415,7 @@ sub tkEnd
 	#close log file
 	endLog( $funcName );
 	undef $log;
-  $log = "$dirName$progName.log";
+  $log = $dirName . $progName . '.log';
 
 	#focus on exit button and reset status
 	$proc = 'Waiting on command...';
@@ -2392,7 +2459,7 @@ sub tkEnd
 }
 
 #----------------------------------------------------------------------------------------------------------
-# program exits
+# GUI program exit & write out selections from GUI for next run use
 sub tkExit
 #----------------------------------------------------------------------------------------------------------
 {
@@ -2407,7 +2474,7 @@ sub tkExit
 }
 
 #----------------------------------------------------------------------------------------------------------
-#save current file/directory selection for next use
+# save current file/directory selection for next use
 sub saveLastVal
 #----------------------------------------------------------------------------------------------------------
 {
@@ -2443,7 +2510,7 @@ sub saveLastVal
 }
 
 #----------------------------------------------------------------------------------------------------------
-#read last file/directory selection for current use
+# read previous run file/directory selection for current use
 sub readLastVal
 #----------------------------------------------------------------------------------------------------------
 {
@@ -2475,21 +2542,23 @@ sub readLastVal
 }
 
 #----------------------------------------------------------------------------------------------------------
-#start logging to file, if no arg then set as main program log otherwise set to passed arg function name
+# start logging (if subroutine name passed log will be for subroutine, otherwise log will be global)
+# **args:
+#     1 - function name of calling subroutine (opt) [use 'undef' if global]
 sub startLog
 #----------------------------------------------------------------------------------------------------------
 {
   my ( $funcName ) = @_;
 
 	my $now = dateTime();
-	my $timeSt = $now->{'date'} . " at " . $now->{'time'};
+	my $timeSt = $now->{'date'} . ' at ' . $now->{'time'};
 
 	if ( $funcName ) {
 		if ( testL ( 'd', $dirName ) ) {
-	    $log = "$dirName$funcName.log";
+	    $log = $dirName . $funcName . '.log';
 		} else {
 	  	my $dir = getcwdL();
-	    $log = "$dir$FS$progName.log";
+	    $log = $dir . $FS . $progName . '.log';
 		}
 		openL ( \$funcLogFH, '>:encoding(UTF-8)', $log );
 		if ( ! fileno( $funcLogFH ) ) {
@@ -2498,17 +2567,17 @@ sub startLog
 			badExit( $funcName, "Not able to create log file: '" . $log . "', returned:\n" . $funcSysErr . "\nand:\n" . $funcOS_Err );
 		} else {
 			#redirect STDERR to log file
-			open( STDERR, '>>:encoding(UTF-8)', $log ) or warning( undef, "Not able to redirect STDERR" );
+			open( STDERR, '>>:encoding(UTF-8)', $log ) or warning( undef, 'Not able to redirect STDERR' );
 			my $oldfh = select $funcLogFH; $| = 1; select $oldfh;
 		}
 
 		toLog( $funcName, "$Sep\nFunction: $funcName\n\tDate: $timeSt\n$Sep" );
 	} else {
     if ( testL ( 'd', $dirName ) ) {
-	    $log = "$dirName$progName.log";
+	    $log = $dirName . $progName . '.log';
 	  } else {
 	  	my $dir = getcwdL();
-	    $log = "$dir$FS$progName.log";
+	    $log = $dir . $FS . $progName . '.log';
 	  }
 		openL ( \$logFH, '>:encoding(UTF-8)', $log );
 		if ( ! fileno( $logFH ) ) {
@@ -2517,7 +2586,7 @@ sub startLog
 			badExit( undef, "Not able to create log file: '" . $log . "', returned:\n" . $logSysErr . "\nand:\n" . $logOS_Err );
 		} else {
 			#redirect STDERR to log file
-			open( STDERR, '>>:encoding(UTF-8)', $log ) or warning( undef, "Not able to redirect STDERR" );
+			open( STDERR, '>>:encoding(UTF-8)', $log ) or warning( undef, 'Not able to redirect STDERR' );
 			my $oldfh = select $logFH; $| = 1; select $oldfh;
 		}
 
@@ -2527,7 +2596,10 @@ sub startLog
 }
 
 #----------------------------------------------------------------------------------------------------------
-#write out to log
+# add to log (if subroutine name passed log will be for subroutine, otherwise log will be global)
+# **args:
+#     1 - function name of calling subroutine (opt) [use 'undef' if global]
+#     2 - log message
 sub toLog
 #----------------------------------------------------------------------------------------------------------
 {
@@ -2541,7 +2613,7 @@ sub toLog
 			my ( $package, $file, $line, $subname ) = caller( 1 );
 			$subname =~ s#main::##;
 			unless ( $subname =~ m#badExit#i ) {
-				badExit( $funcName, "$msg" );
+				badExit( $funcName, $msg );
 			}
 		}
 	} else {
@@ -2552,21 +2624,23 @@ sub toLog
 			my ( $package, $file, $line, $subname ) = caller( 1 );
 			$subname =~ s#main::##;
 			unless ( $subname =~ m#badExit#i ) {
-				badExit( undef, "$msg" );
+				badExit( undef, $msg );
 			}
 		}
 	}
 }
 
 #----------------------------------------------------------------------------------------------------------
-#end log process
+# end logging (if subroutine name passed log will be for subroutine, otherwise log will be global)
+# **args:
+#     1 - function name of calling subroutine (opt) [use 'undef' if global]
 sub endLog
 #----------------------------------------------------------------------------------------------------------
 {
   my ( $funcName ) = @_;
 
 	my $now = dateTime();
-	my $timeSt = $now->{'date'} . " at " . $now->{'time'};
+	my $timeSt = $now->{'date'} . ' at ' . $now->{'time'};
 
 	if ( ( $funcName ) && ( fileno( $funcLogFH ) ) ) {
 		#output any warning data
