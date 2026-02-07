@@ -54,6 +54,12 @@
 #                                changed match expression to escape special characaters in match for 
 #                                renumber() & extractTags() / added test for content & open log handle in 
 #                                toLog()
+#         1.6 -  7 Feb 2026	 RAD added processing instruction for output of XML in make_XML_playlist() / 
+#                                changed order of cleanTags() to after extractTags() in make_XML_playlist() 
+#                                corrected output of 'year' metadata in make_XML_playlist() / corrected 
+#                                setting tag value to primary tag name in @listOfTagArray in mkvTools() & 
+#                                exifTools() / added stripping of "/[total_tracks]" in 'track' tag / added 
+#                                date/time output in make_XML_playlist() ending log entry
 #
 #
 #   TO-DO:
@@ -61,7 +67,7 @@
 #
 #**********************************************************************************************************
 
-my $Version = '1.5';
+my $Version = '1.6';
 
 use strict;
 use warnings;
@@ -804,6 +810,7 @@ sub make_XML_playlist
 	badExit( $subName, 'Not able to create new XML::Writer object' ) if ( ! $writer );
 	#write XML Declaration
 	$writer->xmlDecl( 'UTF-8' ) or badExit( $subName, "Not able to write out XML Declaration" );
+	$writer->comment( '*IMPORTANT*: Only 1 attribute/value pair is allowed per each child node of <song>' );
 	#determine playlist name
 	my $playlist_name;
 	if ( $dirName =~ m#phone_music#i ) {
@@ -883,13 +890,13 @@ sub make_XML_playlist
 			exifTools( $num, \%tags, $songFile );
 		}
 
-		#call method to clean and sort metadata tags
-		cleanTags( \%tags, $songFile );
-
 		#check if crucial tags have been set, try to determine from filename & path
 		if ( ( ! $tags{title} ) || ( ! $tags{artist} ) || ( ! $tags{track} ) || ( ! $tags{album} ) || ( ! $tags{year} ) || ( ! $tags{length} ) ) {
 			extractTags( $num, \%tags, $songFile );
 		}
+
+		#call method to clean and sort metadata tags
+		cleanTags( \%tags, $songFile );
 
 		#write out XML to file of metadata for song file
 		toLog( $subName, "   - Writing out XML to list\n" );
@@ -929,7 +936,7 @@ sub make_XML_playlist
 		$writer->endTag( 'album' );
 		#write <year>
 		$writer->startTag( 'year' );
-		$writer->characters( $tags{year} ) if ( $tags{date} );
+		$writer->characters( $tags{year} ) if ( $tags{year} );
 		$writer->endTag( 'year' );
 		#write <genre>
 		$writer->startTag( 'genre' );
@@ -1664,7 +1671,6 @@ sub mkvTools
 		#output to xml file
 		'"' . $songFileXml . '"'
 	);
-
 	#start process to create batch file for calling 'mkvextract' for files/folders with Unicode characters
 	my $mkvBat = $ENV{TEMP} . $FS . 'mkv-' . $num . '.bat';
 	my $mkvBatFH;
@@ -1706,8 +1712,11 @@ sub mkvTools
 		my $tagName = $xmlNode->findvalue( './Name' );
 		my $tagValue = $xmlNode->findvalue( './String' );
 		my $lcTagName = lc( $tagName );
-		if ( grep /$lcTagName/, @listOfTagArrays ) {
-			$tagsRef->{$lcTagName} = $tagValue unless ( $tagsRef->{$lcTagName} );
+		foreach my $tagArrayRef ( @listOfTagArrays ) {
+			my $tagArrayPrimary = lc( ${$tagArrayRef}[0] );
+			if ( grep /$lcTagName/, @{$tagArrayRef} ) {
+				$tagsRef->{$tagArrayPrimary} = $tagValue unless ( $tagsRef->{$tagArrayPrimary} );
+			}
 		}
 	}
 
@@ -1821,8 +1830,9 @@ sub exifTools
 		my $lcKey = lc( $key );
 		#check MKV tag names and substitute to actual tag name
 		foreach my $jsonRef ( @listOfTagArrays ) {
+			my $tagArrayPrimary = ${$jsonRef}[0];
 			if ( grep /$lcKey/, @{$jsonRef} ) {
-				$tagsRef->{$lcKey} = $tagsInnerHashRef->{$key} unless ( $tagsRef->{$lcKey} );
+				$tagsRef->{$tagArrayPrimary} = $tagsInnerHashRef->{$key} unless ( $tagsRef->{$tagArrayPrimary} );
 			}
 		}
 	}
@@ -1936,6 +1946,10 @@ sub cleanTags
 				$tagsRef->{albumsortorder} =~ s#^(the|a|an)\s+(.+)#$2#i;
 			}
 		} elsif ( $key =~ m#^track$#i ) {
+			#remove total number
+			if ( $tagsRef->{track} =~ m#(\d+)\/\d+# ) {
+				$tagsRef->{track} = $1;
+			}
 			if ( $songFile =~ m#\.(ogg|flac)$#i ) {
 				$tagsRef->{tracknumber} = $tagsRef->{$key} unless ( $tagsRef->{tracknumber} );
 			} elsif ( $songFile =~ m#\.mkv$#i ) {
@@ -2038,7 +2052,7 @@ sub extractTags
 
 
 	my ( $fileName, $filePath ) = fileparse( abspathL ( $songFile ) );
-	updStatus( "Extracting tags in: '" . $fileName . "'" );
+	updStatus( "Determining tags in: '" . $fileName . "'" );
 
 	#determine values from path of song file, using expected 'Music' directory
 	if ( $filePath =~ m#\\Music\\([^\\]+)\\([^\\]+)\\#i ) {
@@ -2600,9 +2614,9 @@ sub startLog
 			print "\n\n*ERROR: Not able to create log file: '" . $log . "', returned:\n" . $logSysErr . "\nand:\n" . $logOS_Err . "\n\n";
 			exit( 255 );
 		} else {
+			my $oldfh = select $logFH; $| = 1; select $oldfh;
 			#redirect STDERR to log file
 			open( STDERR, '>>:encoding(UTF-8)', $log ) or warning( undef, 'Not able to redirect STDERR' );
-			my $oldfh = select $logFH; $| = 1; select $oldfh;
 		}
 
 		toLog( undef, "$SEP\nTool: $progName\n\tVersion: $Version\n\n\tDate: $timeSt\n$Sep" );
@@ -2662,7 +2676,7 @@ sub endLog
 		if ( $warn{$funcName} ) {
 			toLog( $funcName, "\n   **(" . $warn{$funcName} . ") Warnings were detected**\n\n" );
 		}
-		toLog( $funcName, "$funcName Process Completed\n$SEP\n\n" );
+		toLog( $funcName, "$funcName Process Completed\n\tDate: $timeSt\n$SEP\n\n" );
 		close $funcLogFH;
 	} elsif ( fileno( $logFH ) ) {
 		#output any warning data
