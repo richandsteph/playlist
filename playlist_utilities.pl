@@ -49,6 +49,11 @@
 #                                all subroutines, including optional/required arguments / corrected 
 #                                duplicate (or missing) file separator in getSongList() / added directory 
 #                                to .m3u filename in make_m3u() for logging purposes
+#         1.5 -  6 Feb 2026	 RAD changed logging before MainLoop to print to console / corrected adding of 
+#                                ending slash to $dirName in tkGetDir(), tkGetFile(), & readLastVal() / 
+#                                changed match expression to escape special characaters in match for 
+#                                renumber() & extractTags() / added test for content & open log handle in 
+#                                toLog()
 #
 #
 #   TO-DO:
@@ -56,7 +61,7 @@
 #
 #**********************************************************************************************************
 
-my $Version = '1.4';
+my $Version = '1.5';
 
 use strict;
 use warnings;
@@ -158,9 +163,6 @@ my @listOfXmlTags = (
 	'comment'
 );
 
-#declare log file handle, start logging
-startLog();
-
 #process passed argument(s)
 if ( testL ( 's', $ARGV[0] ) ) {
 	$filePath = $ARGV[0];
@@ -174,11 +176,14 @@ if ( testL ( 's', $ARGV[0] ) ) {
 } elsif ( testL ( 'd', $ARGV[0] ) ) {
 	$dirName = $ARGV[0];
 } elsif ( $ARGV[0] ) {
-		badExit( undef, "Optional argument(s) incorrect, single possible correct argument should be playlist XML filename: \n   perl C:\\git_playlist\\$progName.pl \[PLAYLIST_XML_FILENAME\]" );
+		print "\n\n*WARNING: Optional argument(s) incorrect,\n  single possible correct argument should be XML playlist filename:\n    \"perl C:\\git_playlist\\$progName.pl \[XML_PLAYLIST_FILENAME\]\"\n\n";
 }
 
 #read possible last value file for setting of $dirName and/or $filePath
 readLastVal();
+
+#declare log file handle, start logging
+startLog();
 
 #create initial window and pass to tk caller
 my $M->{'window'} = MainWindow->new();
@@ -674,21 +679,25 @@ sub tkGetDir
 #----------------------------------------------------------------------------------------------------------
 {
 	my ( $getDirPath ) = @_;
-	my $dir;
 
-	if ( testL ( 'd', $getDirPath ) ) {
-		( undef, $dir ) = fileparse( abspathL ( $getDirPath ) );
+	if ( $getDirPath ) {
+		$getDirPath =~ s#[\/\\]#$FS#g;
+		if ( $getDirPath !~ m#[\/\\]$# ) {
+			$getDirPath = $getDirPath . $FS;
+		}
 	}
 
 	$getDirPath = $M->{'window'}->chooseDirectory(
-		-initialdir => $dir,
+		-initialdir => $getDirPath,
 		-title			=> 'Choose Directory...'
 	);
 
 	if ( testL ( 'd', $getDirPath ) ) {
 		$dirName = $getDirPath;
-		$dirName = $dirName;
 		$dirName =~ s#[\/\\]#$FS#g;
+		if ( $dirName !~ m#[\/\\]$# ) {
+			$dirName = $dirName . $FS;
+		}
 	}
 }
 
@@ -715,11 +724,9 @@ sub tkGetFile
 	$getFilePath =~ s#[\/\\]#$FS#g;
 	if ( testL ( 'e', $getFilePath ) ) {
 		$filePath = $getFilePath;
-		if ( $dir && $file ) {
-			$fileName = $file;
-			$dirName = $dir;
-		} else {
-			( $fileName, $dirName ) = fileparse( abspathL ( $filePath ) );
+		( $fileName, $dirName ) = fileparse( abspathL ( $filePath ) );
+		if ( $dirName !~ m#[\/\\]$# ) {
+			$dirName = $dirName . $FS;
 		}
 	}
 }
@@ -1341,8 +1348,9 @@ sub renumber
 				if ( $nodeName =~ m#^title$#i ) {
 					my $titleContent = $subNode->textContent;
 					foreach my $val ( values( %title ) ) {
+						$titleContent =~ s#([\(\)\[\]\*])#\$1#g;
 						if ( $val =~ m#^$titleContent$#i ) {
-							toLog( $subName, "\tNOTE: The content '" . $titleContent . "' of <title> in <song> no. " . $nodeCnt . " is duplicated\n" );
+							toLog( $subName, "\tNOTE: The content '" . $titleContent . "' in <title> of <song> no. " . $nodeCnt . " is duplicated\n" );
 						}
 					}
 					#store current <title> content in hash for checking against other nodes
@@ -2039,7 +2047,7 @@ sub extractTags
 		my $album = $2;
 		#add escape '\' to square brackets for match expression
 		my $albumMatch = $album;
-		$albumMatch =~ s#([\[\]])#\\$1#g;
+		$albumMatch =~ s#([\(\)\[\]\*])#\$1#g;
 		$tagsRef->{artist} = $artist if ( ! $tagsRef->{artist} );
 		#determine if directory is actually a compilation with 'Disc' folders
 		if ( ( $artist =~ m#^$albumMatch$#i ) || ( $album =~ m#^dis[ck]\s*\d+$#i ) ) {
@@ -2400,7 +2408,7 @@ sub badExit
 	$M->{'window'}->destroy;
 
 	#return exception code
-	exit 255;
+	exit( 255 );
 }
 
 #----------------------------------------------------------------------------------------------------------
@@ -2525,17 +2533,22 @@ sub readLastVal
 		my $dirSysErr = decode( $Config{enc_to_system} || 'UTF-8', $! );
 		my $dirOS_Err = decode( $Config{enc_to_system} || 'UTF-8', $^E );
 		if ( ! testL ( 's', $lastFile ) ) {
-			warning( undef, "Not able to open last value config file: '" . $lastFile . "', returned:\n" . $dirSysErr . "\nand:\n" . $dirOS_Err );
+			print "\n\n*WARNING: Not able to open last value config file: '" . $lastFile . "', returned:\n" . $dirSysErr . "\nand:\n" . $dirOS_Err . "\n\n";
 		} else {
 			@lastVal = <$lastFH>;
 			close( $lastFH );
 			chomp( @lastVal );
 			$filePath = $lastVal[0];
+			$filePath =~ s#[\/\\]#$FS#g;
 			$dirName = $lastVal[1];
+			$dirName =~ s#[\/\\]#$FS#g;
 			if ( $lastVal[0] ) {
 				( $fileName, $dirName ) = fileparse( abspathL ( $filePath ) );
 				#value returned in 1st line of lastValue.cfg has zero-width character(s) at end of value - rebuild
 				$filePath = $dirName . $fileName;
+			}
+			if ( $dirName !~ m#[\/\\]$# ) {
+				$dirName = $dirName . $FS;
 			}
 		}
 	}
@@ -2578,12 +2591,14 @@ sub startLog
 	  } else {
 	  	my $dir = getcwdL();
 	    $log = $dir . $FS . $progName . '.log';
+	    print "\n*NOTE: The global log file is saved in current directory as:\n  " . $log . "\n\n";
 	  }
 		openL ( \$logFH, '>:encoding(UTF-8)', $log );
 		if ( ! fileno( $logFH ) ) {
 			my $logSysErr = decode( $Config{enc_to_system} || 'UTF-8', $! );
 			my $logOS_Err = decode( $Config{enc_to_system} || 'UTF-8', $^E );
-			badExit( undef, "Not able to create log file: '" . $log . "', returned:\n" . $logSysErr . "\nand:\n" . $logOS_Err );
+			print "\n\n*ERROR: Not able to create log file: '" . $log . "', returned:\n" . $logSysErr . "\nand:\n" . $logOS_Err . "\n\n";
+			exit( 255 );
 		} else {
 			#redirect STDERR to log file
 			open( STDERR, '>>:encoding(UTF-8)', $log ) or warning( undef, 'Not able to redirect STDERR' );
@@ -2617,14 +2632,14 @@ sub toLog
 			}
 		}
 	} else {
-		if ( fileno( $logFH ) ) {
+		if ( ( $logFH ) && ( fileno( $logFH ) ) ) {
 			print $logFH $msg;
 		} else {
 			#log file is not open, write to error window
 			my ( $package, $file, $line, $subname ) = caller( 1 );
 			$subname =~ s#main::##;
 			unless ( $subname =~ m#badExit#i ) {
-				badExit( undef, $msg );
+				promptUser( 'error', $msg );
 			}
 		}
 	}
