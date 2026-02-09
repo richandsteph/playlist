@@ -60,6 +60,22 @@
 #                                setting tag value to primary tag name in @listOfTagArray in mkvTools() & 
 #                                exifTools() / added stripping of "/[total_tracks]" in 'track' tag / added 
 #                                date/time output in make_XML_playlist() ending log entry
+#         1.7 -  7 Feb 2026	 RAD updated output to console in getSongList() / corrected grep statements to 
+#                                match tag name exactly in exifTools() & mkvTools() / corrected storing & 
+#                                looping through XML values, based on priority of @listOfTagArrays in 
+#                                mkvTools() / created deleteFile(), createFile(), & loadXml() for common 
+#                                operations / corrected match expression when determining 'title' & 
+#                                content includes '.' in extractTags() / added calling 'ffprobe' to 
+#                                determine 'bitrate' in mkvTools() / changed matching expression for 
+#                                'bitrate' to accept number in 10,000's in cleanTags() / changed matching 
+#                                expression to properly match folder hierarchy when determining tags by 
+#                                path in extractTags() / added '+' to $albummatch in extractTags() / 
+#                                corrected match expression when determining 'title', 'album', 'artist', 
+#                                etc. from song filename in extractTags() / added test for existence when 
+#                                close() statements in writeTags() / added check for Windows error in 
+#                                badExit() / added check for $funcName when writing toLog() in badExit() / 
+#                                added calling of exifTools() when song file is .mkv, for determining some 
+#                                tags that mkvTools() doesn't
 #
 #
 #   TO-DO:
@@ -67,7 +83,7 @@
 #
 #**********************************************************************************************************
 
-my $Version = '1.6';
+my $Version = '1.7';
 
 use strict;
 use warnings;
@@ -140,9 +156,12 @@ my $proc = 'Waiting on command...';
 
 #array list of possible ID3 tag names in nested arrays (priority is 1st item in sub-array)
 my @listOfTagArrays = (
-	[ 'albumartist', 'album_artist', 'albumartistsortorder', 'albumartistsort' ],
-	[ 'album', 'originalalbum', 'albumsortorder', 'albumsort' ],
-	[ 'artist', 'originalartist', 'artistsortorder', 'artistsort', 'ensemble', 'band', 'author' ],
+	[ 'albumartist', 'album_artist' ],
+	[ 'albumartistsortorder', 'albumartistsort' ],
+	[ 'album', 'originalalbum' ],
+	[ 'albumsortorder', 'albumsort' ],
+	[ 'artist', 'originalartist', 'ensemble', 'band', 'author' ],
+	[ 'artistsortorder', 'artistsort' ],
 	[ 'bitrate', 'bit_rate', 'audiobitrate' ],
 	[ 'comment', 'comment-xxx' ],
 	[ 'composer' ],
@@ -150,7 +169,8 @@ my @listOfTagArrays = (
 	[ 'length', 'duration' ],
 	[ 'genre' ],
 	[ 'publisher' ],
-	[ 'title', 'titlesortorder', 'titlesort' ],
+	[ 'title' ],
+	[ 'titlesortorder', 'titlesort' ],
 	[ 'track', 'tracknumber', 'part_number', 'trackid' ],
 	[ 'year', 'date', 'originaldate', 'originalreleaseyear', 'release_date', 'datetimeoriginal', 'recordingdates' ]
 );
@@ -282,6 +302,92 @@ sub progName
 }
 
 #----------------------------------------------------------------------------------------------------------
+# delete file & log error/warning messages
+# **args:
+#     1 - file to delete
+#     2 - $subName from passing routine
+#     3 - description of file
+sub deleteFile
+#----------------------------------------------------------------------------------------------------------
+{
+	my ( $file, $subName, $desc ) = @_;
+
+	toLog( $subName, "   - Cleaning up temporary " . $desc . " file\n" );
+
+	if ( testL ( 'e', $file ) ) {
+		my $fileDel = unlinkL ( $file );
+		my $unlinkSysErr = decode( $Config{enc_to_system} || 'UTF-8', $! );
+		my $unlinkOS_Err = decode( $Config{enc_to_system} || 'UTF-8', $^E );
+		warning( $subName, "Not able to remove temporary " . $desc . " file: '" . $file . "', returned:\n" . $unlinkSysErr . "\nand:\n" , $unlinkOS_Err ) if ( ! $fileDel );
+	} else {
+		badExit( $subName, "No " . $desc . " file to delete: '" . $file . "'" );
+	}
+
+	return;
+}
+
+#----------------------------------------------------------------------------------------------------------
+# create file & log error/warning messages
+# **args:
+#     1 - file to create
+#     2 - $subName from passing routine
+#     3 - content of file
+#     4 - description of file
+sub createFile
+#----------------------------------------------------------------------------------------------------------
+{
+	my ( $file, $subName, $content, $desc ) = @_;
+	my $fileFH;
+
+	#open/close file with commands written to it
+	toLog( $subName, "   - Creating " . $desc . " file: '" . $file . "'\n" );
+	openL ( \$fileFH, '>:encoding(UTF-8)', $file );
+	if ( ! fileno( $fileFH ) ) {
+		my $fileSysErr = decode( $Config{enc_to_system} || 'UTF-8', $! );
+		my $fileOS_Err = decode( $Config{enc_to_system} || 'UTF-8', $^E );
+		badExit( $subName, "Not able to create $desc file: '" . $file . "', returned:\n" . $fileSysErr . "\nand:\n" . $fileOS_Err );
+	} else {
+		my $newFH = select $fileFH; $| = 1; select $newFH;
+		print $fileFH $content;
+		close( $fileFH );
+	}
+
+	return;
+}
+
+#----------------------------------------------------------------------------------------------------------
+# load XML instance and return $dom object
+# **args:
+#     1 - file to load
+#     2 - $subName from passing routine
+sub loadXml
+#----------------------------------------------------------------------------------------------------------
+{
+	my ( $file, $subName ) = @_;
+	my ( $dom, $xmlFH );
+
+	toLog( $subName, "   - Loading XML: '" . $file . "' into DOM\n" );
+	openL ( \$xmlFH, '<:encoding(UTF-8)', $file );
+	if ( ! fileno( $xmlFH ) ) {
+		my $xmlSysErr = decode( $Config{enc_to_system} || 'UTF-8', $! );
+		my $xmlOS_Err = decode( $Config{enc_to_system} || 'UTF-8', $^E );
+		badExit( $subName, "Not able to open XML file: '" . $file . "', returned:\n" . $xmlSysErr . "\nand:\n" . $xmlOS_Err );
+	} else {
+		binmode $xmlFH;
+		$dom = XML::LibXML->load_xml( IO => $xmlFH );
+		if ( ! $dom ) {
+			my $xmlSysErr = decode( $Config{enc_to_system} || 'UTF-8', $! );
+			my $xmlEvalErr = decode( $Config{enc_to_system} || 'UTF-8', $@ );
+			badExit( $subName, "Couldn't load XML file: '" . $file . "', returned:\n" . $xmlSysErr . "\nand:\n" . $xmlEvalErr );
+		} else {
+			close( $xmlFH );
+		}
+	}
+
+	return( $dom );
+}
+
+#----------------------------------------------------------------------------------------------------------
 # read directory and return a list of XML files [$dirName must be populated globally]
 sub getXML_List
 #----------------------------------------------------------------------------------------------------------
@@ -292,6 +398,7 @@ sub getXML_List
 	my ( $package, $file, $line, $subName ) = caller( 1 );
 	$subName =~ s#main::##;
 
+	toLog( $subName, "   - Building list of XML files\n");
 	updStatus( 'Building list of XML files' );
 
 	my $dir = Win32::LongPath->new();
@@ -751,9 +858,9 @@ sub make_XML_playlist
 
 	#must specify directory or file
 	unless ( $dirName ) {
-		my $ans = promptUser( 'warning', "No directory selected or passed,\n do you want to continue?", 'Yes', 'No' );
+		my $ans = promptUser( 'warning', "No music directory selected or passed,\n do you want to continue?", 'Yes', 'No' );
 		if ( $ans =~ m#No# ) {
-			badExit( $subName, "User chose to stop process,\n no directory selected or passed" );
+			badExit( $subName, "User chose to stop process,\n no music directory selected or passed" );
 		}
 		$M->{'select'}->focus();
 		return;
@@ -800,7 +907,9 @@ sub make_XML_playlist
 	toLog( $subName, "Scouring Music folders to build list of song files...\n" );
 
 	my @songList;
+	print "\n  Crawling through folders:\n";
 	getSongList( \@songList, $dirName );
+	print "\n  Finished crawling folders\n";
 	
 	toLog( $subName, "====\n...Processing Song Files in: $dirName\n\n" );
 	
@@ -825,36 +934,17 @@ sub make_XML_playlist
 	
 	#start process to create batch file for calling 'chcp 65001' for files/folders with Unicode characters
 	my $statBat = $ENV{TEMP} . $FS . 'stat.bat';
-	my $statBatFH;
-	#open/close batch file with commands written to it
-	toLog( $subName, " - Creating batch file wrapper set console code page: '" . $statBat . "'\n" );
-	openL ( \$statBatFH, '>:encoding(UTF-8)', $statBat );
-	if ( ! fileno( $statBatFH ) ) {
-		my $statSysErr = decode( $Config{enc_to_system} || 'UTF-8', $! );
-		my $statOS_Err = decode( $Config{enc_to_system} || 'UTF-8', $^E );
-		badExit( $subName, "Not able to create temporary batch file: '" . $statBat . "', returned:\n" . $statSysErr . "\nand:\n" . $statOS_Err );
-	} else {
-		my $statFH = select $statBatFH; $| = 1; select $statFH;
-		print $statBatFH "\n" . '@echo off' . "\n" . 'echo   **Setting Console Code Page to 65001**' . "\n" . 'chcp 65001';
-		close( $statBatFH );
-	}
+	my $content = "\n" . '@echo off' . "\n" . 'echo   **Setting Console Code Page to 65001**' . "\n" . 'chcp 65001';
+	createFile( $statBat, $subName, $content, 'batch file wrapper to set console code page' );
 	
 	#execute batch file wrapper to set console code page
-	toLog( $subName, " - Executing batch file to set console code page\n" );
+	toLog( $subName, "   - Executing batch file to set console code page\n" );
 	my $stdErr;
 	run3( $statBat, \undef, \undef, \$stdErr );
 	badExit( $subName, "Not able to run set console code page batch file wrapper: '" . $statBat . "', returned: " . $stdErr ) if ( $? || $stdErr );
 	
-	#clean up batch file
-	toLog( $subName, " - Cleaning up temporary console code page batch file\n" );
-	if ( testL ( 'e', $statBat ) ) {
-		my $fileDel = unlinkL ( $statBat );
-		my $unlinkSysErr = decode( $Config{enc_to_system} || 'UTF-8', $! );
-		my $unlinkOS_Err = decode( $Config{enc_to_system} || 'UTF-8', $^E );
-		warning( $subName, "Not able to remove temporary console code page batch file: '" . $statBat . "', returned:\n" . $unlinkSysErr . "\nand:\n" , $unlinkOS_Err ) if ( ! $fileDel );
-	} else {
-		badExit( $subName, "No console code page batch file to delete: '" . $statBat . "'" );
-	}
+	#clean up temporary file
+	deleteFile( $statBat, $subName, 'console code page batch' );
 	
 	#set overall counter for songs
 	my $num = 0;
@@ -875,20 +965,11 @@ sub make_XML_playlist
 		#set per song hash for tag metadata
 		my %tags;
 	
-		#determine song file type to call best method for ID3 metadata extracting
+		#call mkvTools() when song file type is .mkv to obtain metadata not available with exifTools()
 		if ( $songFile =~ m#\.mkv$#i ) {
 			mkvTools( $num, \%tags, $songFile );
-		} elsif ( $songFile =~ m#\.mp3$#i ) {
-			exifTools( $num, \%tags, $songFile );
-		} elsif ( $songFile =~ m#\.m4a$#i ) {
-			exifTools( $num, \%tags, $songFile );
-		} elsif ( $songFile =~ m#\.aiff$#i ) {
-			exifTools( $num, \%tags, $songFile );
-		} elsif ( $songFile =~ m#\.(ogg|flac)$#i ) {
-			exifTools( $num, \%tags, $songFile );
-		} else {
-			exifTools( $num, \%tags, $songFile );
 		}
+		exifTools( $num, \%tags, $songFile );
 
 		#check if crucial tags have been set, try to determine from filename & path
 		if ( ( ! $tags{title} ) || ( ! $tags{artist} ) || ( ! $tags{track} ) || ( ! $tags{album} ) || ( ! $tags{year} ) || ( ! $tags{length} ) ) {
@@ -899,7 +980,7 @@ sub make_XML_playlist
 		cleanTags( \%tags, $songFile );
 
 		#write out XML to file of metadata for song file
-		toLog( $subName, "   - Writing out XML to list\n" );
+		toLog( $subName, "   - Writing XML nodes to DOM\n" );
 		#build and output new playlist song node
 		$writer->startTag( 'song', number => $num );
 		#write <track>
@@ -977,7 +1058,7 @@ sub make_XML_playlist
 		#write out close song XML tag
 		$writer->endTag( 'song' );
 	
-		toLog( $subName, "  Writing \"" . $tags{title} . "\" by \"" . $tags{artist} . "\" as number $num to playlist XML file\n" );
+		toLog( $subName, "  Writing \"" . $tags{title} . "\" by \"" . $tags{artist} . "\" as number $num to XML playlist file\n" );
 	}
 	
 	#write out close playlist XML tag
@@ -985,30 +1066,20 @@ sub make_XML_playlist
 	$writer->end() or badExit( $subName, 'Not able to write complete XML to file' );
 	
 	#write out new XML playlist file
-	my $playlistXmlFile = $dirName . $playlist_name . '.xml';
-	my $xmlOutFH;
-	openL ( \$xmlOutFH, '>:encoding(UTF-8)', $playlistXmlFile );
-	if ( ! fileno( $xmlOutFH ) ) {
-		my $xmlSysErr = decode( $Config{enc_to_system} || 'UTF-8', $! );
-		my $xmlOS_Err = decode( $Config{enc_to_system} || 'UTF-8', $^E );
-		badExit( $subName, "Not able to create XML playlist file: '" . $playlistXmlFile . "', returned:\n" . $xmlSysErr . "\nand:\n" . $xmlOS_Err );
-	} else {
-		my $xmlfh = select $xmlOutFH; $| = 1; select $xmlfh;
-		print $xmlOutFH $writer;
-		close( $xmlOutFH );
-	}
+	my $xmlPlaylistFile = $dirName . $playlist_name . '.xml';
+	createFile( $xmlPlaylistFile, $subName, $writer, 'XML playlist' );
 
-	toLog( $subName, "\n...Created XML Playlist: '" . $playlistXmlFile . "'\n\n\n" );
+	toLog( $subName, "\n...Created XML Playlist: '" . $xmlPlaylistFile . "'\n\n\n" );
 	toLog( $subName, " *WARNING*: There were " . $warn{$subName} . " warning(s) for process...\n\n\n" ) if ( $warn{$subName} );
 	toLog( undef, "  ...Finished Creating XML Playlist from: '" . $dirName . "'\n\n" );
 	#echo status to console
-	my ( $xmlName ) = fileparse( abspathL ( $playlistXmlFile ) );
+	my ( $xmlName ) = fileparse( abspathL ( $xmlPlaylistFile ) );
 	binmode( STDOUT, ":encoding(UTF-8)" );
 	print "   Finished Creating XML Playlist '" . $xmlName . "'\n";
 
 	#process end
 	if ( $filePath ) {
-		updStatus( "Finished Creating XML Playlist: '" . $playlistXmlFile . "'" );
+		updStatus( "Finished Creating XML Playlist: '" . $xmlPlaylistFile . "'" );
 	} else {
 		my $folderNm;
 		( $folderNm ) = fileparse( abspathL ( $dirName ) );
@@ -1105,23 +1176,7 @@ sub make_m3u
 		print "\n   Processing '$xmlFile'\n";
 
 		#load XML data
-		my ( $dom, $xmlFH );
-		openL ( \$xmlFH, '<:encoding(UTF-8)', $xmlFile );
-		if ( ! fileno( $xmlFH ) ) {
-			my $xmlSysErr = decode( $Config{enc_to_system} || 'UTF-8', $! );
-			my $xmlOS_Err = decode( $Config{enc_to_system} || 'UTF-8', $^E );
-			badExit( $subName, "Not able to open XML file: '" . $xmlFile . "', returned:\n" . $xmlSysErr . "\nand:\n" . $xmlOS_Err );
-		} else {
-			binmode $xmlFH;
-			$dom = XML::LibXML->load_xml( IO => $xmlFH );
-			if ( ! $dom ) {
-				my $xmlSysErr = decode( $Config{enc_to_system} || 'UTF-8', $! );
-				my $xmlEvalErr = decode( $Config{enc_to_system} || 'UTF-8', $@ );
-				badExit( $subName, "Couldn't load XML file: '" . $xmlFile . "', returned:\n" . $xmlSysErr . "\nand:\n" . $xmlEvalErr );
-			} else {
-				close( $xmlFH );
-			}
-		}
+		my $dom = loadXml( $xmlFile, $subName );
 
 		#create M3U playlist header
 		my $m3uData = "#EXTM3U\n#EXTENC: UTF-8\n#PLAYLIST:";
@@ -1167,20 +1222,10 @@ sub make_m3u
 		}
 	
 		#write out new .m3u playlist file
-		my $m3uFH;
 		my ( $m3uFile, $m3uFilePath );
 		$m3uFile = $m3uFileName . '.m3u';
 		$m3uFilePath = $dirName . $m3uFile;
-		openL ( \$m3uFH, '>:encoding(UTF-8)', $m3uFilePath );
-		if ( ! fileno( $m3uFH ) ) {
-			my $m3uSysErr = decode( $Config{enc_to_system} || 'UTF-8', $! );
-			my $m3uOS_Err = decode( $Config{enc_to_system} || 'UTF-8', $^E );
-			badExit( $subName, "Not able to create '" . $m3uFilePath . "', returned:\n" . $m3uSysErr . "\nand:\n" . $m3uOS_Err );
-		} else {
-			my $oldfh = select $m3uFH; $| = 1; select $oldfh;
-			print $m3uFH $m3uData;
-			close( $m3uFH );
-		}
+		createFile( $m3uFilePath, $subName, $m3uData, '.m3u' );
 
 		toLog( $subName, "\n...Made .m3u Playlist: '" . $m3uFilePath . "'\n\n\n" );
 		toLog( $subName, " *WARNING*: There were " . $warn{make_m3u} . " warning(s) for process...\n\n\n" ) if ( $warn{make_m3u} );
@@ -1288,23 +1333,7 @@ sub renumber
 		print "\n   Renumbering '$xmlFile'\n";
 	
 		#load XML data
-		my ( $dom, $xmlInFH );
-		openL ( \$xmlInFH, '<:encoding(UTF-8)', $xmlFile );
-		if ( ! fileno( $xmlInFH ) ) {
-			my $xmlSysErr = decode( $Config{enc_to_system} || 'UTF-8', $! );
-			my $xmlOS_Err = decode( $Config{enc_to_system} || 'UTF-8', $^E );
-			badExit( $subName, "Not able to open XML file: '" . $xmlFile . "', returned:\n" . $xmlSysErr . "\nand:\n" . $xmlOS_Err );
-		} else {
-			binmode( $xmlInFH );
-			$dom = XML::LibXML->load_xml( IO => $xmlInFH );
-			if ( ! $dom ) {
-				my $xmlSysErr = decode( $Config{enc_to_system} || 'UTF-8', $! );
-				my $xmlEvalErr = decode( $Config{enc_to_system} || 'UTF-8', $@ );
-				badExit( $subName, "Couldn't load XML file: '" . $xmlFile . "', returned:\n" . $xmlSysErr . "\nand:\n" . $xmlEvalErr );
-			} else {
-				close( $xmlInFH );
-			}
-		}
+		my $dom = loadXml( $xmlFile, $subName );
 	
 		#create XML writer object, so can output empty XML elements without collapsing
 		my $writer = XML::Writer->new( OUTPUT => 'self', DATA_MODE => 1, DATA_INDENT => 2, UNSAFE => 1, ENCODING => 'utf-8' );
@@ -1355,7 +1384,7 @@ sub renumber
 				if ( $nodeName =~ m#^title$#i ) {
 					my $titleContent = $subNode->textContent;
 					foreach my $val ( values( %title ) ) {
-						$titleContent =~ s#([\(\)\[\]\*])#\$1#g;
+						$titleContent =~ s#([\(\)\[\]\*\+])#\$1#g;
 						if ( $val =~ m#^$titleContent$#i ) {
 							toLog( $subName, "\tNOTE: The content '" . $titleContent . "' in <title> of <song> no. " . $nodeCnt . " is duplicated\n" );
 						}
@@ -1396,17 +1425,8 @@ sub renumber
 		$writer->end() or badExit( $subName, 'Not able to end XML document' );
 	
 		#write out renumbered XML playlist file
-		my $xmlOutFH;
-		openL ( \$xmlOutFH, '>:encoding(UTF-8)', $xmlFile );
-		if ( ! fileno( $xmlOutFH ) ) {
-			my $outSysErr = decode( $Config{enc_to_system} || 'UTF-8', $! );
-			my $outOS_Err = decode( $Config{enc_to_system} || 'UTF-8', $^E );
-			badExit( $subName, "Not able to create '" . $xmlFile . "', returned:\n" . $outSysErr . "\nand:\n" . $outOS_Err );
-		} else {
-			my $newfh = select $xmlOutFH; $| = 1; select $newfh;
-			print $xmlOutFH $writer;
-			close( $xmlOutFH );
-		}
+		createFile( $xmlFile, $subName, $writer, 'XML playlist' );
+
 		toLog( $subName, "\n...Finished Renumbering XML file: '" . $xmlFile . "'\n\n\n" );
 		toLog( $subName, " *WARNING*: There were " . $warn{renumber} . " warning(s) for process...\n\n\n" ) if ( $warn{renumber} );
 		toLog( undef, "  ...Finished Renumbering XML file: '" . $xmlFile . "'\n\n" );
@@ -1441,9 +1461,9 @@ sub update_ID3_tags
 
 	#must specify file or directory
 	unless ( $filePath ) {
-		my $ans = promptUser( 'warning', "No file (or directory) selected or passed,\n do you want to continue?", 'Yes', 'No' );
+		my $ans = promptUser( 'warning', "No XML file selected or passed,\n do you want to continue?", 'Yes', 'No' );
 		if ( $ans =~ m#No# ) {
-			badExit( $subName, "User chose to stop process,\n no file (or directory) selected or passed" );
+			badExit( $subName, "User chose to stop process,\n no XML file selected or passed" );
 		}
 		$M->{'select'}->focus();
 		return;
@@ -1498,18 +1518,8 @@ sub update_ID3_tags
 	print "\n   Processing '$playlistFilename.xml'\n";
 	
 	#load playlist XML
-	my ( $dom, $xmlFH );
-	openL ( \$xmlFH, '<:encoding(UTF-8)', $filePath );
-	if ( ! fileno( $xmlFH ) ) {
-		my $xmlSysErr = decode( $Config{enc_to_system} || 'UTF-8', $! );
-		my $xmlOS_Err = decode( $Config{enc_to_system} || 'UTF-8', $^E );
-		badExit( $subName, "Not able to open playlist XML file for reading: '" . $filePath . "', returned:\n" . $xmlSysErr . "\nand:\n" . $xmlOS_Err );
-	} else {
-		binmode $xmlFH;
-		$dom = XML::LibXML->load_xml( IO => $xmlFH );
-		badExit( $subName, "Couldn't load playlist XML file: '" . $playlistFilename . ".xml'" ) unless ( $dom );
-	}
-	
+	my $dom = loadXml( $filePath, $subName );
+
 	#determine playlist name
 	my $playlistName;
 	if ( $dom->findnodes( '/playlist/@name' ) ) {
@@ -1519,14 +1529,14 @@ sub update_ID3_tags
 	}
 	
 	#set output object for playlist XML
-	toLog( $subName, "- Initializing XML playlist\n" );
+	toLog( $subName, "   - Initializing XML playlist DOM\n" );
 	my $writer = XML::Writer->new( OUTPUT => 'self', DATA_MODE => 1, DATA_INDENT => 2, UNSAFE => 1 );
 	badExit( $subName, 'Not able to create new XML::Writer object' ) if ( ! $writer );
 	#write XML Declaration
 	$writer->xmlDecl( 'UTF-8' ) or badExit( $subName, 'Not able to write out XML Declaration' );
 	$writer->comment( '*IMPORTANT*: Only 1 attribute/value pair is allowed per each child node of <song>' );
 	#write date into root <playlist> tag attribute, with playlist name as attribute
-	toLog( $subName, "- Setting date/time for playlist\n" );
+	toLog( $subName, "   - Setting date/time for playlist\n" );
 	my $now = dateTime();
 	my $today = $now->{'date'} . ' at ' . $now->{'time'};
 	$writer->startTag( 'playlist', name => $playlistName, date => $today );
@@ -1577,28 +1587,19 @@ sub update_ID3_tags
 			}
 		}
 	
-		#determine song file type to call best method for ID3 metadata extracting
+		#call mkvTools() when song file type is .mkv to obtain metadata not available with exifTools()
 		if ( $songFile =~ m#\.mkv$#i ) {
 			mkvTools( $num, \%tags, $songFile );
-		} elsif ( $songFile =~ m#\.mp3$#i ) {
-			exifTools( $num, \%tags, $songFile );
-		} elsif ( $songFile =~ m#\.m4a$#i ) {
-			exifTools( $num, \%tags, $songFile );
-		} elsif ( $songFile =~ m#\.aiff$#i ) {
-			exifTools( $num, \%tags, $songFile );
-		} elsif ( $songFile =~ m#\.(ogg|flac)$#i ) {
-			exifTools( $num, \%tags, $songFile );
-		} else {
-			exifTools( $num, \%tags, $songFile );
 		}
-	
-		#call method to clean and sort metadata tags
-		cleanTags( \%tags, $songFile );
+		exifTools( $num, \%tags, $songFile );
 	
 		#check if crucial tags have been set, try to determine from filename & path
 		if ( ( ! $tags{title} ) || ( ! $tags{artist} ) || ( ! $tags{track} ) || ( ! $tags{album} ) || ( ! $tags{year} ) || ( ! $tags{length} ) ) {
 			extractTags( $num, \%tags, $songFile );
 		}
+	
+		#call method to clean and sort metadata tags
+		cleanTags( \%tags, $songFile );
 	
 		#check crucial tags in @listOfXmlTags for values
 		toLog( $subName, "   - Scanning tags to see if any desired tags are not defined\n" );
@@ -1619,17 +1620,7 @@ sub update_ID3_tags
 	$writer->end() or badExit( $subName, "Not able to write end() XML instance to \$writer object" );
 	
 	#write out new playlist XML
-	my $xmlOutFH;
-	openL ( \$xmlOutFH, '>:encoding(UTF-8)', $filePath );
-	if ( ! fileno( $xmlOutFH ) ) {
-		my $xmlSysErr = decode( $Config{enc_to_system} || 'UTF-8', $! );
-		my $xmlOS_Err = decode( $Config{enc_to_system} || 'UTF-8', $^E );
-		badExit( $subName, "Not able to create '" . $filePath . "', returned:\n" . $xmlSysErr . "\nand:\n" . $xmlOS_Err );
-	} else {
-		my $newfh = select $xmlOutFH; $| = 1; select $newfh;
-		print $xmlOutFH $writer or badExit( $subName, "Not able to write out XML to '" . $playlistFilename . ".xml'" );
-		close( $xmlOutFH );
-	}
+	createFile( $filePath, $subName, $writer, 'XML playlist' );
 
 	toLog( $subName, "\n...Created Updated Playlist XML file: '" . $filePath . "'\n\n\n" );
 	toLog( $subName, ' *WARNING*: There were ' . $warn{update_ID3_tags} . " warning(s) for process...\n\n\n" ) if ( $warn{update_ID3_tags} );
@@ -1673,19 +1664,8 @@ sub mkvTools
 	);
 	#start process to create batch file for calling 'mkvextract' for files/folders with Unicode characters
 	my $mkvBat = $ENV{TEMP} . $FS . 'mkv-' . $num . '.bat';
-	my $mkvBatFH;
-	#open/close batch file with commands written to it
-	toLog( $subName, "   - Creating batch file wrapper for 'mkvextract': '" . $mkvBat . "'\n" );
-	openL ( \$mkvBatFH, '>:encoding(UTF-8)', $mkvBat );
-	if ( ! fileno( $mkvBatFH ) ) {
-		my $mkvSysErr = decode( $Config{enc_to_system} || 'UTF-8', $! );
-		my $mkvOS_Err = decode( $Config{enc_to_system} || 'UTF-8', $^E );
-		badExit( $subName, "Not able to create temporary batch file to run 'mkvextract': '" . $mkvBat . "', returned:\n" . $mkvSysErr . "\nand:\n" . $mkvOS_Err );
-	} else {
-		my $oldFH = select $mkvBatFH; $| = 1; select $oldFH;
-		print $mkvBatFH "\n" . 'chcp 65001' . "\n" . 'call ' . join( ' ', @mkvArgs );
-		close( $mkvBatFH );
-}
+	my $content = "\n" . 'chcp 65001' . "\n" . 'call ' . join( ' ', @mkvArgs );
+	createFile( $mkvBat, $subName, $content, "'mkvextract' batch" );
 
 	#execute batch file wrapper to call 'mkvextract' command batch file
 	toLog( $subName, "   - Executing batch file for 'mkvextract'\n" );
@@ -1695,43 +1675,88 @@ sub mkvTools
 	badExit( $subName, "Not able to run 'mkvextract', returned:\n" . $stdErr ) if ( $? || $stdErr);
 
 	#load XML data
-	my ( $dom, $xmlFH );
-	openL ( \$xmlFH, '<:encoding(UTF-8)', $songFileXml );
-	if ( ! fileno( $xmlFH ) ) {
-		my $xmlSysErr = decode( $Config{enc_to_system} || 'UTF-8', $! );
-		my $xmlOS_Err = decode( $Config{enc_to_system} || 'UTF-8', $^E );
-		badExit( $subName, "Not able to open XML file: '" . $songFileXml . "', returned:\n" . $xmlSysErr . "\nand:\n" . $xmlOS_Err );
-	} else {
-		binmode $xmlFH;
-		$dom = XML::LibXML->load_xml( IO => $xmlFH );
-		badExit( $subName, "Couldn't load XML file: '" . $songFileXml . "'" ) unless ( $dom );
-		close( $xmlFH );
-	}
+	my $dom = loadXml( $songFileXml, $subName );
 
+	#store values from XML in tags hash
 	foreach my $xmlNode ( $dom->findnodes( '//Simple' ) ) {
 		my $tagName = $xmlNode->findvalue( './Name' );
 		my $tagValue = $xmlNode->findvalue( './String' );
 		my $lcTagName = lc( $tagName );
 		foreach my $tagArrayRef ( @listOfTagArrays ) {
 			my $tagArrayPrimary = lc( ${$tagArrayRef}[0] );
-			if ( grep /$lcTagName/, @{$tagArrayRef} ) {
-				$tagsRef->{$tagArrayPrimary} = $tagValue unless ( $tagsRef->{$tagArrayPrimary} );
+			if ( grep /^$lcTagName$/, @{$tagArrayRef} ) {
+				$tagsRef->{$lcTagName} = $tagValue unless ( $tagsRef->{$lcTagName} );
 			}
 		}
 	}
+	#loop through array of arrays for possible tags to set tag's value, according to priority of array
+	for my $tagsRow ( 0 .. $#listOfTagArrays ) {
+		my $tagsRowRef = $listOfTagArrays[$tagsRow];
+		#loop through inner array in reverse for each tag name, so priority is last (lowest array item) value set
+		my $primaryTagName = $listOfTagArrays[$tagsRow][0];
+		#save initial base value
+		my $primaryTagValue = $tagsRef->{$primaryTagName};
+		for ( my $tagsCol = $#{$tagsRowRef}; $tagsCol >= 0; $tagsCol-- ) {
+			my $tagName = $listOfTagArrays[$tagsRow][$tagsCol];
+			if ( defined $tagsRef->{$tagName} ) {
+				$tagsRef->{$primaryTagName} = $tagsRef->{$tagName};
+			}
+		}
+		#reset base value to starting value, before setting all others
+		$tagsRef->{$primaryTagName} = $primaryTagValue if ( $primaryTagValue );
+		for my $tagsCol ( 0 .. $#{$tagsRowRef} ) {
+			my $tagName = $listOfTagArrays[$tagsRow][$tagsCol];
+			#only set when original had a value
+			$tagsRef->{$tagName} = $tagsRef->{$primaryTagName} if ( $tagsRef->{$tagName} );
+		}
+	}
 
-	toLog( $subName, "   - Cleaning up temporary 'mkvextract' files\n" );
-	if ( testL ( 'e', $songFileXml ) ) {
-		my $fileDel = unlinkL ( $mkvBat );
-		my $unlinkSysErr = decode( $Config{enc_to_system} || 'UTF-8', $! );
-		my $unlinkOS_Err = decode( $Config{enc_to_system} || 'UTF-8', $^E );
-		warning( $subName, "Not able to remove temporary 'mkvextract' batch file: '" . $mkvBat . "', returned:\n" . $unlinkSysErr . "\nand:\n" . $unlinkOS_Err ) if ( ! $fileDel );
-		$fileDel = unlinkL ( $songFileXml );
-		$unlinkSysErr = decode( $Config{enc_to_system} || 'UTF-8', $! );
-		$unlinkOS_Err = decode( $Config{enc_to_system} || 'UTF-8', $^E );
-		warning( $subName, "Not able to remove XML data for song file: '" . $songFileXml . "', returned:\n" . $unlinkSysErr . "\nand:\n" . $unlinkOS_Err ) if ( ! $fileDel );
-	} else {
-		badExit( $subName, "XML data not created for song file: '" . $songFile . "'" );
+	deleteFile( $mkvBat, $subName, "'mkvextract'" );
+	deleteFile( $songFileXml, $subName, 'XML data for song' );
+
+	#determine 'bitrate', if not specified previously
+	if ( ! $tagsRef->{bitrate} ) {
+		#set ffprobe command for finding 'bitrate' on song files that don't have the value
+		toLog( $subName, "   - Preparing command for 'ffprobe' to determine 'bitrate'\n" );
+		my @ffprobeArgs = (
+			'"' . $ffprobeCmd . '"',
+			'-v error',
+			'-show_entries format=bit_rate',
+			'-of default=noprint_wrappers=1:nokey=1',
+			'"' . $songFile . '"'
+		);
+	
+		#call 'ffprobe' to extract 'bitrate' of song file
+		my $bitrate;
+		#start process to create batch file with 'ffprobe' command
+		my $ffprobeBat = $ENV{TEMP} . $FS . 'ffprobe-bitrate-' . $num . '.bat';
+		my $content = "\n" . 'chcp 65001' . "\n" . 'call ' . join( ' ', @ffprobeArgs );
+		createFile( $ffprobeBat, $subName, $content, "'ffprobe-bitrate' batch" );
+	
+		toLog( $subName, "   - Executing 'ffprobe-bitrate' batch file\n" );
+		my ( $rawStdErr, $stdErr );
+		run3( $ffprobeBat, \undef, \$bitrate, \$rawStdErr );
+		$stdErr = decode( $Config{enc_to_system} || 'UTF-8', $rawStdErr );
+		warning( $subName, "Not able to run 'ffprobe-bitrate', returned:\n" . $stdErr ) if ( $? || $stdErr );
+
+		#'bitrate' needs some format checks
+		#match at least 6 digits (for 1,000's), but also capture any trailing digits but leaving the rest off)
+		if ( $bitrate =~ m#\n(\d+)# ) {
+			$bitrate = $1;
+			if ( $bitrate =~ s#^(\d{5}\d*).*$#$1# ) {
+				$bitrate = $bitrate / 1000;
+				$bitrate = int( $bitrate );
+			} else {
+				#strip any extraneous characters from digits otherwise
+				$bitrate =~ s#^(\d+).*$#$1#;
+			}
+		}
+
+		#assign to metadata tag
+		$tagsRef->{bitrate} = $bitrate;
+
+		#clean up temporary files
+		deleteFile( $ffprobeBat, $subName, "'ffprobe-bitrate' batch" );
 	}
 }
 
@@ -1782,31 +1807,10 @@ sub exifTools
 
 	#start process to create batch file for calling 'exiftool' for files/folders with Unicode characters
 	my $jsonBat = $ENV{TEMP} . $FS . 'exiftool-' . $num . '.bat';
-	my ( $jsonBatFH, $jsonFH, $argsFH );
-	#open/close batch file with commands written to it
-	toLog( $subName, "   - Creating batch file wrapper for 'exiftool': '" . $jsonBat . "'\n" );
-	openL ( \$jsonBatFH, '>:encoding(UTF-8)', $jsonBat );
-	if ( ! fileno( $jsonBatFH ) ) {
-		my $jsonSysErr = decode( $Config{enc_to_system} || 'UTF-8', $! );
-		my $jsonOS_Err = decode( $Config{enc_to_system} || 'UTF-8', $^E );
-		badExit( $subName, "Not able to create temporary batch file to run 'exiftool': '" . $jsonBat . "', returned:\n" . $jsonSysErr . "\nand:\n" . $jsonOS_Err );
-	} else {
-		my $oldFH = select $jsonBatFH; $| = 1; select $oldFH;
-		print $jsonBatFH "\n" . 'chcp 65001' . "\n" . 'call ' . join( ' ', @exifToolArgs );
-		close( $jsonBatFH );
-	}
-	#open/close 'exiftool' args file with arguments written to it
-	toLog( $subName, "   - Creating argument file for 'exiftool': '" . $exifToolArgsFile . "'\n" );
-	openL ( \$argsFH, '>:encoding(UTF-8)', $exifToolArgsFile );
-	if ( ! fileno( $argsFH ) ) {
-		my $argsSysErr = decode( $Config{enc_to_system} || 'UTF-8', $! );
-		my $argsOS_Err = decode( $Config{enc_to_system} || 'UTF-8', $^E );
-		badExit( $subName, "Not able to create temporary arguments file to run 'exiftool': '" . $exifToolArgsFile . "', returned:\n" . $argsSysErr . "\nand:\n" . $argsOS_Err );
-	} else {
-		my $oldFH = select $argsFH; $| = 1; select $oldFH;
-		print $argsFH @exifToolFileArgs;
-		close( $argsFH );
-	}
+	my $content = "\n" . 'chcp 65001' . "\n" . 'call ' . join( ' ', @exifToolArgs );
+	createFile( $jsonBat, $subName, $content, "'exiftool' batch" );
+	$content = join( "\n", @exifToolFileArgs );
+	createFile( $exifToolArgsFile, $subName, $content, "'exiftool' arguments" );
 
 	#execute batch file wrapper to call 'exiftool' command batch file
 	toLog( $subName, "   - Executing batch file for 'exiftool'\n" );
@@ -1831,22 +1835,15 @@ sub exifTools
 		#check MKV tag names and substitute to actual tag name
 		foreach my $jsonRef ( @listOfTagArrays ) {
 			my $tagArrayPrimary = ${$jsonRef}[0];
-			if ( grep /$lcKey/, @{$jsonRef} ) {
+			if ( grep /^$lcKey$/, @{$jsonRef} ) {
 				$tagsRef->{$tagArrayPrimary} = $tagsInnerHashRef->{$key} unless ( $tagsRef->{$tagArrayPrimary} );
 			}
 		}
 	}
-	toLog( $subName, "   - Cleaning up temporary 'exiftool' files\n" );
-	if ( testL ( 'e', $jsonBat ) || testL ( 'e', $exifToolArgsFile ) ) {
-		my $fileDel = unlinkL ( $jsonBat );
-		my $unlinkSysErr = decode( $Config{enc_to_system} || 'UTF-8', $! );
-		my $unlinkOS_Err = decode( $Config{enc_to_system} || 'UTF-8', $^E );
-		warning( $subName, "Not able to remove temporary 'exiftool' batch file: '" . $jsonBat . "', returned:\n" . $unlinkSysErr . "\nand:\n" . $unlinkOS_Err ) if ( ! $fileDel );
-		$fileDel = unlinkL ( $exifToolArgsFile );
-		$unlinkSysErr = decode( $Config{enc_to_system} || 'UTF-8', $! );
-		$unlinkOS_Err = decode( $Config{enc_to_system} || 'UTF-8', $^E );
-		warning( $subName, "Not able to remove arguments file for 'exiftool': '" . $exifToolArgsFile . "', returned:\n" . $unlinkSysErr . "\nand:\n" . $unlinkOS_Err ) if ( ! $fileDel );
-	}
+
+	#clean up temporary files
+	deleteFile( $jsonBat, $subName, "'exiftool' batch" );
+	deleteFile( $exifToolArgsFile, $subName, "'exiftool' arguments" );
 }
 
 #----------------------------------------------------------------------------------------------------------
@@ -1873,7 +1870,7 @@ sub cleanTags
 		my $priorityTagValue = $tagsRef->{$priorityTagName};
 		for ( my $tagsCol = $#{$innerArrayRef}; $tagsCol >= 0; $tagsCol-- ) {
 			my $tagName = $listOfTagArrays[$tagsRow][$tagsCol];
-			$tagsRef->{$priorityTagName} = $tagsRef->{$tagName} if ( $tagsRef->{$tagName} );
+			$tagsRef->{$priorityTagName} = $tagsRef->{$tagName} if ( defined $tagsRef->{$tagName} );
 		}
 		#reset base value to starting value, before setting all others
 		$tagsRef->{$priorityTagName} = $priorityTagValue if ( $priorityTagValue );
@@ -1968,7 +1965,7 @@ sub cleanTags
 		} elsif ( $key =~ m#^bitrate$#i ) {
 			#'bitrate' needs some format checks
 			#match at least 6 digits (for 1,000's), but also capture any trailing digits but leaving the rest off)
-			if ( $tagsRef->{$key} =~ s#^(\d{6}\d*).*$#$1# ) {
+			if ( $tagsRef->{$key} =~ s#^(\d{5}\d*).*$#$1# ) {
 				$tagsRef->{$key} = $tagsRef->{$key} / 1000;
 				$tagsRef->{$key} = int( $tagsRef->{$key} );
 			} else {
@@ -2036,7 +2033,7 @@ sub cleanTags
 
 #----------------------------------------------------------------------------------------------------------
 # extract metadata from song file path, when song file does not have complete metadata (calls 'ffprobe' 
-#   command-line utility when length is not present)
+#   command-line utility when 'length' is not present)
 # **args:
 #     1 - number of current song file
 #     2 - tags hash reference
@@ -2048,20 +2045,19 @@ sub extractTags
 
 	my ( $package, $file, $line, $subName ) = caller( 1 );
 	$subName =~ s#main::##;
-	toLog( $subName, "   - <title> or <artist> (or other) tags have not been set, attempting to set from filename & path\n" );
+	toLog( $subName, "   - <title> or <artist> (and/or other) tags have not been set, attempting to set from filename & path\n" );
 
-
-	my ( $fileName, $filePath ) = fileparse( abspathL ( $songFile ) );
-	updStatus( "Determining tags in: '" . $fileName . "'" );
+	my ( $songFileName, $songFilePath ) = fileparse( abspathL ( $songFile ) );
+	updStatus( "Determining tags in: '" . $songFileName . "'" );
 
 	#determine values from path of song file, using expected 'Music' directory
-	if ( $filePath =~ m#\\Music\\([^\\]+)\\([^\\]+)\\#i ) {
+	if ( $songFilePath =~ m#\\Music\\([^\\]+)\\([^\\]+)\\$#i ) {
 		#song file is inside 'Album'\'Artist'\song file format
 		my $artist = $1;
 		my $album = $2;
 		#add escape '\' to square brackets for match expression
 		my $albumMatch = $album;
-		$albumMatch =~ s#([\(\)\[\]\*])#\$1#g;
+		$albumMatch =~ s#([\(\)\[\]\*\+])#\$1#g;
 		$tagsRef->{artist} = $artist if ( ! $tagsRef->{artist} );
 		#determine if directory is actually a compilation with 'Disc' folders
 		if ( ( $artist =~ m#^$albumMatch$#i ) || ( $album =~ m#^dis[ck]\s*\d+$#i ) ) {
@@ -2076,7 +2072,7 @@ sub extractTags
 			#remove extra artist info
 			$tagsRef->{albumartist} =~ s#^([^;]+)(?<!&amp);.*$#$1#;
 		}
-	} elsif ( $filePath =~ m#\\Music\\([^\\]+)\\#i ) {
+	} elsif ( $songFilePath =~ m#\\Music\\([^\\]+)\\$#i ) {
 		#song file is inside 'Album\song file' format
 		$tagsRef->{artist} = $1 if ( ! $tagsRef->{artist} );
 		$tagsRef->{album} = $1 if ( ! $tagsRef->{album} );
@@ -2089,7 +2085,7 @@ sub extractTags
 		$tagsRef->{albumartist} =~ s#^AC[_ ]DC$#AC\/DC#i;
 	}
 
-	if ( $fileName =~ m#((\d)-)?(\d*)\s*-?\s*([^\.]+)\.(aac|alac|flac|m4a|mka|mkv|mp3|ogg|wma)$#i ) {
+	if ( $songFileName =~ m#((\d)-)?(\d*)\s*-?\s*(.+)\.(aac|alac|flac|m4a|mka|mkv|mp3|ogg|wma)$#i ) {
 		$tagsRef->{title} = $4 if ( ! $tagsRef->{title} );
 		$tagsRef->{track} = $3 if ( ! $tagsRef->{track} );
 		$tagsRef->{discnumber} = $2 if ( ( $2 ) && ( ! $tagsRef->{discnumber} ) );
@@ -2109,28 +2105,15 @@ sub extractTags
 		#call 'ffprobe' to extract length of song file
 		my $length;
 		#start process to create batch file with 'ffprobe' command
-		my $ffprobeBat = $ENV{TEMP} . $FS . 'ffprobe-' . $num . '.bat';
-		#batch file handle ref
-		my $ffprobeFH;
-		#open/close batch file with commands written to it
-		toLog( $subName, "   - Creating 'ffprobe' batch file: '" . $ffprobeBat . "'\n" );
-		openL ( \$ffprobeFH, '>:encoding(UTF-8)', $ffprobeBat );
-		if ( ! fileno( $ffprobeFH ) ) {
-			my $ffSysErr = decode( $Config{enc_to_system} || 'UTF-8', $! );
-			my $ffOS_Err = decode( $Config{enc_to_system} || 'UTF-8', $^E );
-			badExit( $subName, "Not able to create temporary batch file to run 'ffprobe': '" . $ffprobeBat . "', returned:\n" . $ffSysErr . "\nand:\n" . $ffOS_Err );
-		} else {
-			my $oldfh = select $ffprobeFH; $| = 1; select $oldfh;
-			#write empty line to batch file in case of file header conflict
-			print $ffprobeFH "\n" . 'chcp 65001' . "\n" . 'call ' . join( ' ', @ffprobeArgs );
-			close( $ffprobeFH );
-		}
+		my $ffprobeBat = $ENV{TEMP} . $FS . 'ffprobe-length-' . $num . '.bat';
+		my $content = "\n" . 'chcp 65001' . "\n" . 'call ' . join( ' ', @ffprobeArgs );
+		createFile( $ffprobeBat, $subName, $content, "'ffprobe-length' batch" );
 	
-		toLog( $subName, "   - Executing 'ffprobe' batch file\n" );
+		toLog( $subName, "   - Executing 'ffprobe-length' batch file\n" );
 		my ( $rawStdErr, $stdErr );
 		run3( $ffprobeBat, \undef, \$length, \$rawStdErr );
 		$stdErr = decode( $Config{enc_to_system} || 'UTF-8', $rawStdErr );
-		warning( $subName, "Not able to run 'ffprobe', returned:\n" . $stdErr ) if ( $? || $stdErr );
+		warning( $subName, "Not able to run 'ffprobe-length', returned:\n" . $stdErr ) if ( $? || $stdErr );
 		if ( $length =~ m#\n(\d+)# ) {
 			$length = $1;
 			my $minutes = $length / 60;
@@ -2141,18 +2124,11 @@ sub extractTags
 			$tagsRef->{length} = int( $length );
 		}
 	
-		if ( ( ! $tagsRef->{title} ) && ( ! $tagsRef->{artist} ) ) {
-			warning( $subName, 'Could not determine <title>, <artist>, or possibly other tags' );
-		}
-	
-		toLog( $subName, "   - Cleaning up temporary 'ffprobe' files\n" );
-		if ( testL ( 'e', $ffprobeBat ) ) {
-			my $fileDel = unlinkL ( $ffprobeBat );
-			my $unlinkSysErr = decode( $Config{enc_to_system} || 'UTF-8', $! );
-			my $unlinkOS_Err = decode( $Config{enc_to_system} || 'UTF-8', $^E );
-			warning( $subName, "Not able to remove temporary 'ffprobe' batch file: '" . $ffprobeBat . "', returned:\n" . $unlinkSysErr . "\nand:\n" . $unlinkOS_Err ) if ( ! $fileDel );
-		} else {
-			warning( $subName, "Not able to delete 'ffprobe' batch file: '" . $ffprobeBat . "'" );
+		#clean up temporary files
+		deleteFile( $ffprobeBat, $subName, "'ffprobe-length' batch" );
+
+		if ( ( ! $tagsRef->{title} ) || ( ! $tagsRef->{artist} ) || ( ! $tagsRef->{track} ) || ( ! $tagsRef->{album} ) || ( ! $tagsRef->{year} ) || ( ! $tagsRef->{length} ) ) {
+			warning( $subName, 'Could not determine <title>, <artist>, and/or possibly other necessary tags' );
 		}
 	}
 
@@ -2178,8 +2154,8 @@ sub writeTags
 
 	my ( $package, $file, $line, $subName ) = caller( 1 );
 	$subName =~ s#main::##;
-	toLog( $subName, "   - Writing XML nodes to XML playlist\n" );
-	updStatus( 'Writing updated tag metadata to XML playlist' );
+	toLog( $subName, "   - Writing XML nodes to XML playlist dom\n" );
+	updStatus( 'Writing updated tag metadata to XML playlist dom' );
 
 	#write out tags to XML
 	my $numberVal = $songNode->findvalue( './@number' );
@@ -2247,13 +2223,13 @@ sub writeTags
 	my $tmpSongFileName = $songFileName;
 	if ( $tmpSongFileName =~ s#(.)\.(\w\w\w\w?)$#$1_tmp\.$2#i ) {
 		#verifying file is not left open by other process
-		close( $songFilePath . $tmpSongFileName );
-		close( $songFilePath . $songFileName );
+		close( $songFilePath . $tmpSongFileName ) if ( testL ( 'e', $songFilePath . $tmpSongFileName ) );
+		close( $songFilePath . $songFileName ) if ( testL ( 'e', $songFilePath . $songFileName ) );
 		renameL ( $songFilePath . $songFileName, $songFilePath . $tmpSongFileName );
+		my $songSysErr = decode( $Config{enc_to_system} || 'UTF-8', $! );
+		my $songOS_Err = decode( $Config{enc_to_system} || 'UTF-8', $^E );
 		sleep 1;
 		if ( ! testL ( 'e', $songFilePath . $tmpSongFileName ) ) {
-			my $songSysErr = decode( $Config{enc_to_system} || 'UTF-8', $! );
-			my $songOS_Err = decode( $Config{enc_to_system} || 'UTF-8', $^E );
 			badExit( $subName, "Not able to rename song file: '" . $songFilePath . $songFileName . "' to temp file: '" . $songFilePath . $tmpSongFileName . "', returned:\n" . $songSysErr . "\nand:\n" . $songOS_Err );
 		}
 	}
@@ -2316,43 +2292,19 @@ sub writeTags
 
 	#start process to create batch file with 'ffmpeg' commands
 	my $ffmpegBat = $ENV{TEMP} . $FS . 'ffmpeg-' . $num . '.bat';
-	#batch file handle ref
-	my $ffmpegFH;
-	#open/close batch file with commands written to it
-	toLog( $subName, "   - Creating batch file with 'ffmpeg' commands: '" . $ffmpegBat . "'\n" );
-	openL ( \$ffmpegFH, '>:encoding(UTF-8)', $ffmpegBat );
-	if ( ! fileno( $ffmpegFH ) ) {
-		my $ffmpegSysErr = decode( $Config{enc_to_system} || 'UTF-8', $! );
-		my $ffmpegOS_Err = decode( $Config{enc_to_system} || 'UTF-8', $^E );
-		badExit( $subName, "Not able to create temporary batch file to run 'ffmpeg': '" . $ffmpegBat . "', returned:\n" . $ffmpegSysErr . "\nand:\n" . $ffmpegOS_Err );
-	} else {
-		my $prevfh = select $ffmpegFH; $| = 1; select $prevfh;
-		#write empty line to batch file in case of file header conflict
-		print $ffmpegFH "\n" . 'chcp 65001' . "\n" . 'call ' . join( ' ', @ffmpegArgs );
-		close( $ffmpegFH );
-	}
+	my $content = "\n" . 'chcp 65001' . "\n" . 'call ' . join( ' ', @ffmpegArgs );
+	createFile( $ffmpegBat, $subName, $content, "'ffmpeg' batch" );
 
 	#execute batch file wrapper to call 'ffmpeg' commands batch file
 	toLog( $subName, "   - Executing batch file for 'ffmpeg'\n" );
 	my ( $rawStdErr, $stdErr );
 	run3( $ffmpegBat, \undef, \undef, \$rawStdErr );
 	$stdErr = decode( $Config{enc_to_system} || 'UTF-8', $rawStdErr );
-	badExit( $subName, "Not able to run 'ffmpeg', returned:\n" . $stdErr ) if ( $? || $stdErr );
+	badExit( $subName, "Not able to run 'ffmpeg' for song: '" . $songFileName . "', returned:\n" . $stdErr ) if ( $? || $stdErr );
 
-	#removing temp song file & 'ffmpeg' batch file, if successful
-	toLog( $subName, "   - Removing temporary song files & batch files\n" );
-	if ( testL ( 'e', $songFile ) ) {
-		my $fileDel = unlinkL ( $songFilePath . $tmpSongFileName );
-		my $unlinkSysErr = decode( $Config{enc_to_system} || 'UTF-8', $! );
-		my $unlinkOS_Err = decode( $Config{enc_to_system} || 'UTF-8', $^E );
-		warning( $subName, "Not able to remove temporary song file: '" . $songFilePath . $tmpSongFileName . "', returned:\n" . $unlinkSysErr . "\nand:\n" . $unlinkOS_Err ) if ( ! $fileDel );
-		$fileDel = unlinkL ( $ffmpegBat );
-		$unlinkSysErr = decode( $Config{enc_to_system} || 'UTF-8', $! );
-		$unlinkOS_Err = decode( $Config{enc_to_system} || 'UTF-8', $^E );
-		warning( $subName, "Not able to remove temporary 'ffmpeg' batch file: '" . $ffmpegBat . "', returned:\n" . $unlinkSysErr . "\nand:\n" . $unlinkOS_Err ) if ( ! $fileDel );
-	} else {
-		badExit( $subName, "Not able to remove temporary song file & batch files for song file: '" . $songFile . "'" );
-	}
+	#removing temp song file & 'ffmpeg' batch file
+	deleteFile( $songFilePath . $tmpSongFileName, $subName, 'song' );
+	deleteFile( $ffmpegBat, $subName, "'ffmpeg' batch" );
 }
 
 #----------------------------------------------------------------------------------------------------------
@@ -2393,19 +2345,29 @@ sub badExit
 	#store any returned system error info
 	my $rawSysError = $!;
 	my $rawEvalError = $@;
+	my $rawOS_Error = $^E;
 	#decode raw error to use Unicode
 	my $sysError = decode( $Config{enc_to_system} || 'UTF-8', $rawSysError );
 	my $evalError = decode( $Config{enc_to_system} || 'UTF-8', $rawEvalError );
-	if ( $sysError or $evalError ) {
-	  $error .= "\n\n *Failed with following system error message: " . $sysError . "\n *Failed with following eval error message: " . $evalError;
+	my $OS_Error = decode( $Config{enc_to_system} || 'UTF-8', $rawOS_Error );
+	if ( $sysError ) {
+	  $error = "\n\n *Failed with following Perl system error message: " . $sysError;
+	}
+	if ( $evalError ) {
+	  $error .= "\n\n *Failed with following Perl eval error message: " . $evalError;
+	}
+	if ( $OS_Error ) {
+	  $error .= "\n\n *Failed with following Windows error message: " . $OS_Error;
 	}
 	updStatus( undef, 'ERROR...' );
 
-	if ( fileno( $funcLogFH ) ) {
+	if ( ( $funcName ) && ( fileno( $funcLogFH ) ) ) {
 		toLog( $funcName, " **ERROR: $error\n" );
-	}
-	if ( fileno( $logFH ) ) {
+	} elsif ( fileno( $logFH ) ) {
 		toLog( undef, " **ERROR: $error\n" );
+	} else {
+		print "\n\n*ERROR: Not able to write to log file: " . $log . "\n";
+		print "Returned error(s):\n" . $error;
 	}
 
 	promptUser( 'error', $error );
@@ -2413,9 +2375,10 @@ sub badExit
 	#close logs if open
 	if ( ( $funcName ) && ( fileno( $funcLogFH ) ) ) {
 		endLog( $funcName );
-	}
-	if ( fileno( $logFH ) ) {
+	} elsif ( fileno( $logFH ) ) {
 		endLog();
+	} else {
+		print "\n\n*ERROR: Not able to end log file: " . $log;
 	}
 
 	#close window
@@ -2633,28 +2596,26 @@ sub toLog
 #----------------------------------------------------------------------------------------------------------
 {
 	my ( $funcName, $msg ) = @_;
+	my ( $package, $file, $line, $subname ) = caller( 1 );
+	$subname =~ s#main::##;
+	
 
 	if ( $funcName ) {
 		if ( fileno( $funcLogFH ) ) {
 			print $funcLogFH $msg;
 		} else {
-			#log file is not open, write to error window
-			my ( $package, $file, $line, $subname ) = caller( 1 );
-			$subname =~ s#main::##;
+			#log file is not open, write to error function
 			unless ( $subname =~ m#badExit#i ) {
 				badExit( $funcName, $msg );
 			}
 		}
+	} elsif ( fileno( $logFH ) ) {
+		#write to global log file
+		print $logFH $msg;
 	} else {
-		if ( ( $logFH ) && ( fileno( $logFH ) ) ) {
-			print $logFH $msg;
-		} else {
-			#log file is not open, write to error window
-			my ( $package, $file, $line, $subname ) = caller( 1 );
-			$subname =~ s#main::##;
-			unless ( $subname =~ m#badExit#i ) {
-				promptUser( 'error', $msg );
-			}
+		#log file is not open, write to error window
+		unless ( $subname =~ m#badExit#i ) {
+			promptUser( 'error', $msg );
 		}
 	}
 }
