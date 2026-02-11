@@ -76,6 +76,22 @@
 #                                badExit() / added check for $funcName when writing toLog() in badExit() / 
 #                                added calling of exifTools() when song file is .mkv, for determining some 
 #                                tags that mkvTools() doesn't
+#         1.8 - 11 Feb 2026	 RAD added calling 'ffprobe' to determine 'title' in mkvTools() / replaced 
+#                                global $filePath with $fileFQN (Fully Qualified Name) / replaced global 
+#                                $dirName with $dirPath (more accurate identifier) / added to tag array: 
+#                                'artists', 'sort_with', & 'part' / removed handling of Unicode errors in 
+#                                each openL() & opendirL(), and moved to handle in badExit() & warning() / 
+#                                added output to console about global log location in tkGetDir() & 
+#                                tkGetFile() / changed running exifTools() in make_XML_playlist() & 
+#                                update_ID3_tags() to only run if not .mkv file type / changed test for 
+#                                population of $fileFQN to test if file exists in make_XML_playlist() & 
+#                                make_m3u() / refactored some logging in make_m3u(), renumber(), & 
+#                                update_ID3_tags() / refactored run3() to decode raw error into Unicode / 
+#                                removed attempted close() & sleep() on song file & temporary song file in 
+#                                writeTags() / added check for .mkv & .m4a song file types in writeTags() 
+#                                to replace certain different tags / changed logging parameter in 
+#                                writeTags() to only log errors / added test of song file size in 
+#                                writeTags() to check for errors
 #
 #
 #   TO-DO:
@@ -83,7 +99,7 @@
 #
 #**********************************************************************************************************
 
-my $Version = '1.7';
+my $Version = '1.8';
 
 use strict;
 use warnings;
@@ -131,7 +147,7 @@ use constant TK_FNT_I					=> "-*-{Lucida Sans Unicode}-medium-i-normal-*-12-*";
 umask 0000;
 
 #global variables
-my ( $dirName, $fileName, $filePath, $log, $stat );
+my ( $dirPath, $fileFQN, $fileName, $log, $stat );
 my $FS = '\\';
 my $Sep = '-' x 110;
 my $SEP = '=' x 110;
@@ -140,16 +156,16 @@ my $Server = 'DavisServer_1';
 my $Share = 'Movies_Music_Pics';
 #log file handles for function log vs. main log
 my ( $funcLogFH, $logFH );
-#initialize warning hash
+#instantiate warning hash
 my %warn;
 #determine program name
 my $progName = progName();
 
 #command-line tools for song metadata manipulation
 my $exifToolCmd = 'C:\Strawberry\perl\site\bin\exiftool';
+my $ffmpegCmd = 'C:\Users\rich\Documents\Dev\ffmpeg\FFmpeg-exe\bin\ffmpeg.exe';
 my $ffprobeCmd = 'C:\Users\rich\Documents\Dev\ffmpeg\FFmpeg-exe\bin\ffprobe.exe';
 my $mkvCmd = 'C:\Program Files\MKVToolNix\mkvextract.exe';
-my $ffmpegCmd = 'C:\Users\rich\Documents\Dev\ffmpeg\FFmpeg-exe\bin\ffmpeg.exe';
 
 #Tk variables
 my $proc = 'Waiting on command...';
@@ -160,7 +176,7 @@ my @listOfTagArrays = (
 	[ 'albumartistsortorder', 'albumartistsort' ],
 	[ 'album', 'originalalbum' ],
 	[ 'albumsortorder', 'albumsort' ],
-	[ 'artist', 'originalartist', 'ensemble', 'band', 'author' ],
+	[ 'artist', 'originalartist', 'ensemble', 'band', 'author', 'artists' ],
 	[ 'artistsortorder', 'artistsort' ],
 	[ 'bitrate', 'bit_rate', 'audiobitrate' ],
 	[ 'comment', 'comment-xxx' ],
@@ -170,8 +186,8 @@ my @listOfTagArrays = (
 	[ 'genre' ],
 	[ 'publisher' ],
 	[ 'title' ],
-	[ 'titlesortorder', 'titlesort' ],
-	[ 'track', 'tracknumber', 'part_number', 'trackid' ],
+	[ 'titlesortorder', 'titlesort', 'sort_with' ],
+	[ 'track', 'tracknumber', 'part_number', 'part', 'trackid' ],
 	[ 'year', 'date', 'originaldate', 'originalreleaseyear', 'release_date', 'datetimeoriginal', 'recordingdates' ]
 );
 
@@ -191,21 +207,22 @@ my @listOfXmlTags = (
 
 #process passed argument(s)
 if ( testL ( 's', $ARGV[0] ) ) {
-	$filePath = $ARGV[0];
+	$fileFQN = $ARGV[0];
 	#directory separator default for Windows command line
-	$filePath =~ s#[\/\\]#$FS#g;
-	( $fileName, $dirName ) = fileparse( abspathL ( $filePath ) );
-	if ( ! testL ( 'd', $dirName ) ) {
-		$dirName = getcwdL();
+	$fileFQN =~ s#[\/\\]#$FS#g;
+	( $fileName, $dirPath ) = fileparse( abspathL ( $fileFQN ) );
+	if ( ! testL ( 'd', $dirPath ) ) {
+		$dirPath = getcwdL();
+		$dirPath =~ s#[\/\\]#$FS#g;
 	}
-	$filePath = $dirName . $fileName;
+	$fileFQN = $dirPath . $fileName;
 } elsif ( testL ( 'd', $ARGV[0] ) ) {
-	$dirName = $ARGV[0];
+	$dirPath = $ARGV[0];
 } elsif ( $ARGV[0] ) {
 		print "\n\n*WARNING: Optional argument(s) incorrect,\n  single possible correct argument should be XML playlist filename:\n    \"perl C:\\git_playlist\\$progName.pl \[XML_PLAYLIST_FILENAME\]\"\n\n";
 }
 
-#read possible last value file for setting of $dirName and/or $filePath
+#read possible last value file for setting of $dirPath and/or $fileFQN
 readLastVal();
 
 #declare log file handle, start logging
@@ -316,9 +333,7 @@ sub deleteFile
 
 	if ( testL ( 'e', $file ) ) {
 		my $fileDel = unlinkL ( $file );
-		my $unlinkSysErr = decode( $Config{enc_to_system} || 'UTF-8', $! );
-		my $unlinkOS_Err = decode( $Config{enc_to_system} || 'UTF-8', $^E );
-		warning( $subName, "Not able to remove temporary " . $desc . " file: '" . $file . "', returned:\n" . $unlinkSysErr . "\nand:\n" , $unlinkOS_Err ) if ( ! $fileDel );
+		warning( $subName, "Not able to remove temporary " . $desc . " file: '" . $file . "'" ) if ( ! $fileDel );
 	} else {
 		badExit( $subName, "No " . $desc . " file to delete: '" . $file . "'" );
 	}
@@ -341,16 +356,10 @@ sub createFile
 
 	#open/close file with commands written to it
 	toLog( $subName, "   - Creating " . $desc . " file: '" . $file . "'\n" );
-	openL ( \$fileFH, '>:encoding(UTF-8)', $file );
-	if ( ! fileno( $fileFH ) ) {
-		my $fileSysErr = decode( $Config{enc_to_system} || 'UTF-8', $! );
-		my $fileOS_Err = decode( $Config{enc_to_system} || 'UTF-8', $^E );
-		badExit( $subName, "Not able to create $desc file: '" . $file . "', returned:\n" . $fileSysErr . "\nand:\n" . $fileOS_Err );
-	} else {
-		my $newFH = select $fileFH; $| = 1; select $newFH;
-		print $fileFH $content;
-		close( $fileFH );
-	}
+	openL ( \$fileFH, '>:encoding(UTF-8)', $file ) or badExit( $subName, "Not able to create $desc file: '" . $file . "'" );
+	my $newFH = select $fileFH; $| = 1; select $newFH;
+	print $fileFH $content;
+	close( $fileFH );
 
 	return;
 }
@@ -367,28 +376,20 @@ sub loadXml
 	my ( $dom, $xmlFH );
 
 	toLog( $subName, "   - Loading XML: '" . $file . "' into DOM\n" );
-	openL ( \$xmlFH, '<:encoding(UTF-8)', $file );
-	if ( ! fileno( $xmlFH ) ) {
-		my $xmlSysErr = decode( $Config{enc_to_system} || 'UTF-8', $! );
-		my $xmlOS_Err = decode( $Config{enc_to_system} || 'UTF-8', $^E );
-		badExit( $subName, "Not able to open XML file: '" . $file . "', returned:\n" . $xmlSysErr . "\nand:\n" . $xmlOS_Err );
+	openL ( \$xmlFH, '<:encoding(UTF-8)', $file ) or badExit( $subName, "Not able to open XML file: '" . $file . "'" );
+	binmode $xmlFH;
+	$dom = XML::LibXML->load_xml( IO => $xmlFH );
+	if ( ! $dom ) {
+		badExit( $subName, "Couldn't load XML file: '" . $file . "'" );
 	} else {
-		binmode $xmlFH;
-		$dom = XML::LibXML->load_xml( IO => $xmlFH );
-		if ( ! $dom ) {
-			my $xmlSysErr = decode( $Config{enc_to_system} || 'UTF-8', $! );
-			my $xmlEvalErr = decode( $Config{enc_to_system} || 'UTF-8', $@ );
-			badExit( $subName, "Couldn't load XML file: '" . $file . "', returned:\n" . $xmlSysErr . "\nand:\n" . $xmlEvalErr );
-		} else {
-			close( $xmlFH );
-		}
+		close( $xmlFH );
 	}
 
 	return( $dom );
 }
 
 #----------------------------------------------------------------------------------------------------------
-# read directory and return a list of XML files [$dirName must be populated globally]
+# read directory and return a list of XML files [$dirPath must be populated globally]
 sub getXML_List
 #----------------------------------------------------------------------------------------------------------
 {
@@ -402,12 +403,7 @@ sub getXML_List
 	updStatus( 'Building list of XML files' );
 
 	my $dir = Win32::LongPath->new();
-	$dir->opendirL ( $dirName );
-	my $dirSysErr = decode( $Config{enc_to_system} || 'UTF-8', $! );
-	my $dirOS_Err = decode( $Config{enc_to_system} || 'UTF-8', $^E );
-	if ( ! testL ( 'd', $dirName ) ) {
-		badExit( $subName, "Not able to open directory: '" . $dirName . "', returned:\n" . $dirSysErr . "\nand:\n" . $dirOS_Err );
-	}
+	$dir->opendirL ( $dirPath ) or badExit( $subName, "Not able to open directory: '" . $dirPath . "'" );
 
 	@xmlList = grep m/\.xml$/i, $dir->readdirL();
 	$dir->closedirL();
@@ -415,12 +411,10 @@ sub getXML_List
 	#add path info to each XML file in list
 	my @newList;
 	foreach my $file ( @xmlList ) {
-		push @newList, $dirName . $file;
+		push @newList, $dirPath . $file;
 	}
 
-	unless ( scalar( @newList ) ) {
-		badExit( $subName, "No files were found in directory: '" . $dirName . "'" );
-	}
+	badExit( $subName, "No files were found in directory: '" . $dirPath . "'" ) unless ( scalar( @newList ) );
 
 	return( @newList );
 }
@@ -445,12 +439,7 @@ sub getSongList
 	updStatus( 'Building list of song files' );
 
 	my $dir = Win32::LongPath->new();
-	$dir->opendirL ( $workingDir );
-	my $dirSysErr = decode( $Config{enc_to_system} || 'UTF-8', $! );
-	my $dirOS_Err = decode( $Config{enc_to_system} || 'UTF-8', $^E );
-	if ( ! testL ( 'd', $workingDir ) ) {
-		badExit( $subName, "Not able to open directory: '" . $workingDir . "', returned:\n" . $dirSysErr . "\nand:\n" . $dirOS_Err );
-	}
+	$dir->opendirL ( $workingDir ) or badExit( $subName, "Not able to open directory: '" . $workingDir . "'" );
 
 	foreach my $dirItem ( $dir->readdirL() ) {
 		next if $dirItem =~ m#^\.{1,2}$#;
@@ -529,7 +518,7 @@ sub tkMainWindow
 		-padx => [ 38, 0 ]
 	);
 	my $fileEntry = $chooseFile->Entry(
-		-textvariable => \$filePath,
+		-textvariable => \$fileFQN,
 		-width				=> '30',
 		-bg						=> TK_COLOR_FIELD,
 		-fg						=> TK_COLOR_FG
@@ -540,7 +529,7 @@ sub tkMainWindow
 	$fileEntry->xview( 'end' );
 	$M->{'select'} = $chooseFile->Button(
 		-text							=> '...',
-		-command					=> [ \&tkGetFile, $filePath ],
+		-command					=> [ \&tkGetFile, $fileFQN ],
 		-bg								=> TK_COLOR_BG,
 		-fg								=> TK_COLOR_FG,
 		-activebackground => TK_COLOR_VIOL,
@@ -561,7 +550,7 @@ sub tkMainWindow
 		-side => 'left'
 	);
 	my $dirEntry = $chooseDir->Entry(
-		-textvariable => \$dirName,
+		-textvariable => \$dirPath,
 		-width	=> '30',
 		-bg			=> TK_COLOR_FIELD,
 		-fg			=> TK_COLOR_FG
@@ -571,7 +560,7 @@ sub tkMainWindow
 	$dirEntry->xview( 'end' );
 	$M->{'select'} = $chooseDir->Button(
 		-text							=> '...',
-		-command					=> [ \&tkGetDir, $dirName ],
+		-command					=> [ \&tkGetDir, $dirPath ],
 		-bg								=> TK_COLOR_BG,
 		-fg								=> TK_COLOR_FG,
 		-activebackground => TK_COLOR_VIOL,
@@ -798,6 +787,8 @@ sub tkGetDir
 		if ( $getDirPath !~ m#[\/\\]$# ) {
 			$getDirPath = $getDirPath . $FS;
 		}
+		#if directory already populated & changed, note to console about different global log location
+		print "\n *NOTE: The global log file is saved in opening directory as:\n  " . $log . "\n\n";
 	}
 
 	$getDirPath = $M->{'window'}->chooseDirectory(
@@ -806,10 +797,10 @@ sub tkGetDir
 	);
 
 	if ( testL ( 'd', $getDirPath ) ) {
-		$dirName = $getDirPath;
-		$dirName =~ s#[\/\\]#$FS#g;
-		if ( $dirName !~ m#[\/\\]$# ) {
-			$dirName = $dirName . $FS;
+		$dirPath = $getDirPath;
+		$dirPath =~ s#[\/\\]#$FS#g;
+		if ( $dirPath !~ m#[\/\\]$# ) {
+			$dirPath = $dirPath . $FS;
 		}
 	}
 }
@@ -826,6 +817,8 @@ sub tkGetFile
 	my ( $dir, $file );
 	if ( testL ( 'e', $getFilePath ) ) {
 		( $file, $dir ) = fileparse( abspathL ( $getFilePath ) );
+		#if file already populated & changed (which affects directory), note to console about different global log location
+		print "\n *NOTE: The global log file is saved in selected directory as:\n  " . $log . "\n\n";
 	}
 
 	$getFilePath = $M->{'window'}->getOpenFile(
@@ -836,10 +829,10 @@ sub tkGetFile
 
 	$getFilePath =~ s#[\/\\]#$FS#g;
 	if ( testL ( 'e', $getFilePath ) ) {
-		$filePath = $getFilePath;
-		( $fileName, $dirName ) = fileparse( abspathL ( $filePath ) );
-		if ( $dirName !~ m#[\/\\]$# ) {
-			$dirName = $dirName . $FS;
+		$fileFQN = $getFilePath;
+		( $fileName, $dirPath ) = fileparse( abspathL ( $fileFQN ) );
+		if ( $dirPath !~ m#[\/\\]$# ) {
+			$dirPath = $dirPath . $FS;
 		}
 	}
 }
@@ -847,7 +840,7 @@ sub tkGetFile
 #----------------------------------------------------------------------------------------------------------
 # update GUI & create XML playlist from selected root 'Music' folder, crawls all artist/album subfolders, 
 #   calls command-line utility for extraction based on song file type
-#  - $dirName must be populated globally (user directory selection in GUI)
+#  - $dirPath must be populated globally (user directory selection in GUI)
 sub make_XML_playlist
 #----------------------------------------------------------------------------------------------------------
 {
@@ -857,7 +850,7 @@ sub make_XML_playlist
 	updStatus( undef, 'Make XML Playlist...' );
 
 	#must specify directory or file
-	unless ( $dirName ) {
+	unless ( $dirPath ) {
 		my $ans = promptUser( 'warning', "No music directory selected or passed,\n do you want to continue?", 'Yes', 'No' );
 		if ( $ans =~ m#No# ) {
 			badExit( $subName, "User chose to stop process,\n no music directory selected or passed" );
@@ -901,17 +894,17 @@ sub make_XML_playlist
 	$M->{'exit'}->focus();
 
 	#starting log process
-	toLog( undef, "  Creating XML Playlist...\n    See '" . $dirName . $subName . ".log' for details\n\n" );
+	toLog( undef, "  Creating XML Playlist...\n    See '" . $dirPath . $subName . ".log' for details\n\n" );
 	startLog( $subName );
 	
 	toLog( $subName, "Scouring Music folders to build list of song files...\n" );
 
 	my @songList;
 	print "\n  Crawling through folders:\n";
-	getSongList( \@songList, $dirName );
-	print "\n  Finished crawling folders\n";
+	getSongList( \@songList, $dirPath );
+	print "\n  ...Finished crawling folders\n";
 	
-	toLog( $subName, "====\n...Processing Song Files in: $dirName\n\n" );
+	toLog( $subName, "====\n...Processing Song Files in: $dirPath\n\n" );
 	
 	#parse out XML node data from songs to XML file
 	updStatus( 'Creating XML document' );
@@ -922,7 +915,7 @@ sub make_XML_playlist
 	$writer->comment( '*IMPORTANT*: Only 1 attribute/value pair is allowed per each child node of <song>' );
 	#determine playlist name
 	my $playlist_name;
-	if ( $dirName =~ m#phone_music#i ) {
+	if ( $dirPath =~ m#phone_music#i ) {
 		$playlist_name = 'phone-favorites';
 	} else {
 		$playlist_name = 'rich-all-songs';
@@ -939,9 +932,10 @@ sub make_XML_playlist
 	
 	#execute batch file wrapper to set console code page
 	toLog( $subName, "   - Executing batch file to set console code page\n" );
-	my $stdErr;
-	run3( $statBat, \undef, \undef, \$stdErr );
-	badExit( $subName, "Not able to run set console code page batch file wrapper: '" . $statBat . "', returned: " . $stdErr ) if ( $? || $stdErr );
+	my ( $rawStdErr, $stdErr );
+	run3( $statBat, \undef, \undef, \$rawStdErr );
+	$stdErr = decode( $Config{enc_to_system} || 'UTF-8', $rawStdErr );
+	badExit( $subName, "Not able to run set console code page batch file wrapper: '" . $statBat . "', returned:\n" . $stdErr ) if ( $? || $stdErr );
 	
 	#clean up temporary file
 	deleteFile( $statBat, $subName, 'console code page batch' );
@@ -968,8 +962,9 @@ sub make_XML_playlist
 		#call mkvTools() when song file type is .mkv to obtain metadata not available with exifTools()
 		if ( $songFile =~ m#\.mkv$#i ) {
 			mkvTools( $num, \%tags, $songFile );
+		} else {
+			exifTools( $num, \%tags, $songFile );
 		}
-		exifTools( $num, \%tags, $songFile );
 
 		#check if crucial tags have been set, try to determine from filename & path
 		if ( ( ! $tags{title} ) || ( ! $tags{artist} ) || ( ! $tags{track} ) || ( ! $tags{album} ) || ( ! $tags{year} ) || ( ! $tags{length} ) ) {
@@ -1066,23 +1061,23 @@ sub make_XML_playlist
 	$writer->end() or badExit( $subName, 'Not able to write complete XML to file' );
 	
 	#write out new XML playlist file
-	my $xmlPlaylistFile = $dirName . $playlist_name . '.xml';
+	my $xmlPlaylistFile = $dirPath . $playlist_name . '.xml';
 	createFile( $xmlPlaylistFile, $subName, $writer, 'XML playlist' );
 
 	toLog( $subName, "\n...Created XML Playlist: '" . $xmlPlaylistFile . "'\n\n\n" );
 	toLog( $subName, " *WARNING*: There were " . $warn{$subName} . " warning(s) for process...\n\n\n" ) if ( $warn{$subName} );
-	toLog( undef, "  ...Finished Creating XML Playlist from: '" . $dirName . "'\n\n" );
+	toLog( undef, "  ...Finished Creating XML Playlist from: '" . $dirPath . "'\n\n" );
 	#echo status to console
 	my ( $xmlName ) = fileparse( abspathL ( $xmlPlaylistFile ) );
 	binmode( STDOUT, ":encoding(UTF-8)" );
 	print "   Finished Creating XML Playlist '" . $xmlName . "'\n";
 
 	#process end
-	if ( $filePath ) {
+	if ( testL ( 'e', $xmlPlaylistFile ) ) {
 		updStatus( "Finished Creating XML Playlist: '" . $xmlPlaylistFile . "'" );
 	} else {
 		my $folderNm;
-		( $folderNm ) = fileparse( abspathL ( $dirName ) );
+		( $folderNm ) = fileparse( abspathL ( $dirPath ) );
 		updStatus( "Finished Creating XML Playlist(s) from: \"" . $folderNm . "\" folder" );
 	}
 
@@ -1092,7 +1087,7 @@ sub make_XML_playlist
 #----------------------------------------------------------------------------------------------------------
 # update GUI & create .m3u playlist from XML playlist
 #  - runs on single XML playlist file, when $fileName populated (1st priority)
-#  - gathers XML playlist files in selected directory, when $dirName populated
+#  - gathers XML playlist files in selected directory, when $dirPath populated
 sub make_m3u
 #----------------------------------------------------------------------------------------------------------
 {
@@ -1103,10 +1098,10 @@ sub make_m3u
 	updStatus( 'Making .m3u playlist' );
 
 	#must specify directory or file
-	unless ( $dirName || $fileName ) {
+	unless ( $dirPath || $fileName ) {
 		my $ans = promptUser( 'warning', "No directory (or file) selected or passed,\n do you want to continue?", 'Yes', 'No' );
 		if ( $ans =~ m#No# ) {
-			badExit( 'renumber', "User chose to stop process,\n no directory (or file) selected or passed" );
+			badExit( $subName, "User chose to stop process,\n no directory (or file) selected or passed" );
 		}
 		$M->{'select'}->focus();
 		return;
@@ -1148,14 +1143,14 @@ sub make_m3u
 	$M->{'exit'}->focus();
 
 	#starting log process
-	toLog( undef, "  Making .m3u Playlist...\n    See '" . $dirName . $subName . ".log' for details\n\n" );
+	toLog( undef, "  Making .m3u Playlist...\n    See '" . $dirPath . $subName . ".log' for details\n\n" );
 	startLog( $subName );
 	
-	#retrieve list of XML files in $dirName, unless file is selected - just push single item into array
+	#retrieve list of XML files in $dirPath, unless file is selected - just push single item into array
 	my @fileList;
-	if ( $filePath ) {
+	if ( $fileFQN ) {
 		if ( $fileName =~ m#\.xml$#i ) {
-			push @fileList, $filePath;
+			push @fileList, $fileFQN;
 		} else {
 			promptUser( 'warning', 'Selected file is not an XML instance' );
 			toLog( $subName, "File selected is not an XML instance, ending '" . $subName . "' function\n\n" );
@@ -1163,17 +1158,17 @@ sub make_m3u
 			return;
 		}
 	} else {
-		@fileList = getXML_List( $dirName );
+		@fileList = getXML_List( $dirPath );
 	}
 
 	#loop through each XML file in directory
 	my $m3uFileName;
 	foreach my $xmlFile ( @fileList ) {
-		toLog( $subName, "...Processing XML file: '$xmlFile'\n\n" );
-		updStatus( "Processing XML file: '" . $xmlFile . "'" );
+		toLog( $subName, "...Making .m3u playlist from XML: '$xmlFile'\n\n" );
+		updStatus( "Making .m3u from XML: '" . $xmlFile . "'" );
 		#echo status to console
 		binmode( STDOUT, ":encoding(UTF-8)" );
-		print "\n   Processing '$xmlFile'\n";
+		print "\n   Making .m3u for: '" . $xmlFile . "'\n";
 
 		#load XML data
 		my $dom = loadXml( $xmlFile, $subName );
@@ -1224,7 +1219,7 @@ sub make_m3u
 		#write out new .m3u playlist file
 		my ( $m3uFile, $m3uFilePath );
 		$m3uFile = $m3uFileName . '.m3u';
-		$m3uFilePath = $dirName . $m3uFile;
+		$m3uFilePath = $dirPath . $m3uFile;
 		createFile( $m3uFilePath, $subName, $m3uData, '.m3u' );
 
 		toLog( $subName, "\n...Made .m3u Playlist: '" . $m3uFilePath . "'\n\n\n" );
@@ -1237,11 +1232,11 @@ sub make_m3u
 	}
 	
 	#process end
-	if ( $filePath ) {
+	if ( testL ( 'e', $m3uFilePath ) ) {
 		updStatus( "Finished Making .m3u Playlist: \"" . $m3uFileName . "\"" );
 	} else {
 		my $folderNm;
-		( $folderNm ) = fileparse( abspathL ( $dirName ) );
+		( $folderNm ) = fileparse( abspathL ( $dirPath ) );
 		updStatus( "Finished Making .m3u Playlist(s) from: \"" . $folderNm . "\" folder" );
 	}
 	tkEnd( $subName );
@@ -1250,7 +1245,7 @@ sub make_m3u
 #----------------------------------------------------------------------------------------------------------
 # update GUI & renumber XML nodes in selected XML playlist file(s) or directory of XML playlist file(s)
 #  - runs on single XML playlist file, when $fileName populated (1st priority)
-#  - gathers XML playlist files in selected directory, when $dirName populated
+#  - gathers XML playlist files in selected directory, when $dirPath populated
 sub renumber
 #----------------------------------------------------------------------------------------------------------
 {
@@ -1260,10 +1255,10 @@ sub renumber
 	updStatus( undef, 'Renumber...' );
 
 	#must specify directory or file
-	unless ( $dirName || $fileName ) {
+	unless ( $dirPath || $fileName ) {
 		my $ans = promptUser( 'warning', "No directory (or file) selected or passed,\n do you want to continue?", 'Yes', 'No' );
 		if ( $ans =~ m#No# ) {
-			badExit( 'renumber', "User chose to stop process,\n no directory (or file) selected or passed" );
+			badExit( $subName, "User chose to stop process,\n no directory (or file) selected or passed" );
 		}
 		$M->{'select'}->focus();
 		return;
@@ -1305,15 +1300,15 @@ sub renumber
 	$M->{'exit'}->focus();
 
 	#starting log process
-	toLog( undef, "  Renumbering...\n    See '" . $dirName . $subName . ".log' for details\n\n" );
+	toLog( undef, "  Renumbering...\n    See '" . $dirPath . $subName . ".log' for details\n\n" );
 	startLog( $subName );
-	updStatus( "Renumbering XML files in '" . $dirName . "'" );
+	updStatus( "Renumbering XML files in '" . $dirPath . "'" );
 	
-	#retrieve list of XML files in $dirName, unless file is selected - just push single item into array
+	#retrieve list of XML files in $dirPath, unless file is selected - just push single item into array
 	my @fileList;
-	if ( $filePath ) {
+	if ( $fileFQN ) {
 		if ( $fileName =~ m#\.xml$#i ) {
-			push @fileList, $filePath;
+			push @fileList, $fileFQN;
 		} else {
 			promptUser( 'warning', 'Selected file is not an XML instance' );
 			toLog( $subName, "File selected is not an XML instance, ending 'renumber' function\n\n" );
@@ -1321,16 +1316,16 @@ sub renumber
 			return;
 		}
 	} else {
-		@fileList = getXML_List( $dirName );
+		@fileList = getXML_List( $dirPath );
 	}
 
 	#loop through each XML file in directory
 	foreach my $xmlFile ( @fileList ) {
-		toLog( $subName, "...Processing XML File: '$xmlFile'\n\n" );
-		updStatus( "Processing XML file: '" . $xmlFile . "'" );
+		toLog( $subName, "...Renumbering XML File: '$xmlFile'\n\n" );
+		updStatus( "Renumbering XML file: '" . $xmlFile . "'" );
 		#echo status to console
 		binmode( STDOUT, ":encoding(UTF-8)" );
-		print "\n   Renumbering '$xmlFile'\n";
+		print "\n   Renumbering '" . $xmlFile . "'\n";
 	
 		#load XML data
 		my $dom = loadXml( $xmlFile, $subName );
@@ -1338,9 +1333,7 @@ sub renumber
 		#create XML writer object, so can output empty XML elements without collapsing
 		my $writer = XML::Writer->new( OUTPUT => 'self', DATA_MODE => 1, DATA_INDENT => 2, UNSAFE => 1, ENCODING => 'utf-8' );
 		if ( ! $writer ) {
-			my $writeSysErr = decode( $Config{enc_to_system} || 'UTF-8', $! );
-			my $writeEvalErr = decode( $Config{enc_to_system} || 'UTF-8', $@ );
-			badExit( $subName, "Not able to create new XML::Writer object, returned:\n" . $writeSysErr . "and:\n" . $writeEvalErr );
+			badExit( $subName, 'Not able to create new XML::Writer object' );
 		} else {
 			#write XML Declaration
 			$writer->xmlDecl( 'UTF-8' ) or badExit( $subName, 'Not able to write out XML Declaration' );
@@ -1437,11 +1430,11 @@ sub renumber
 	}
 
 	#process end
-	if ( $filePath ) {
+	if ( $fileFQN ) {
 		updStatus( "Finished Renumbering \"" . $fileName . "\"" );
 	} else {
 		my $folderNm;
-		( $folderNm ) = fileparse( abspathL ( $dirName ) );
+		( $folderNm ) = fileparse( abspathL ( $dirPath ) );
 		updStatus( "Finished Renumbering \"" . $folderNm . "\" folder" );
 	}
 	tkEnd( $subName );
@@ -1460,7 +1453,7 @@ sub update_ID3_tags
 	updStatus( undef, 'Update ID3 Tags...' );
 
 	#must specify file or directory
-	unless ( $filePath ) {
+	unless ( $fileFQN ) {
 		my $ans = promptUser( 'warning', "No XML file selected or passed,\n do you want to continue?", 'Yes', 'No' );
 		if ( $ans =~ m#No# ) {
 			badExit( $subName, "User chose to stop process,\n no XML file selected or passed" );
@@ -1505,20 +1498,20 @@ sub update_ID3_tags
 	$M->{'exit'}->focus();
 
 	#starting log process
-	toLog( undef, "  Updating ID3 Tags:\n    See '" . $dirName . $subName . ".log' for details\n\n" );
+	toLog( undef, "  Updating ID3 Tags:\n    See '" . $dirPath . $subName . ".log' for details\n\n" );
 	startLog( $subName );
-	updStatus( "Updating ID3 tags in '" . $dirName . "'" );
+	updStatus( "Updating ID3 tags in '" . $dirPath . "'" );
 	
 	#separate out playlist XML filename and directory
-	my ( $playlistFilename, $playlistFilePath ) = fileparse( abspathL ( $filePath ) );
+	my ( $playlistFilename, $playlistFilePath ) = fileparse( abspathL ( $fileFQN ) );
 	$playlistFilename =~ s#\.\w\w\w?$##;
 	#echo status to console
-	toLog( $subName, "Processing playlist XML file: '" . $playlistFilename . ".xml'...\n" );
+	toLog( $subName, "Updating ID3 Tags in XML playlist file: '" . $playlistFilename . ".xml'...\n" );
 	binmode( STDOUT, ":encoding(UTF-8)" );
-	print "\n   Processing '$playlistFilename.xml'\n";
+	print "\n   Updating ID3 Tags in: '" . $playlistFilename . ".xml'\n";
 	
 	#load playlist XML
-	my $dom = loadXml( $filePath, $subName );
+	my $dom = loadXml( $fileFQN, $subName );
 
 	#determine playlist name
 	my $playlistName;
@@ -1590,8 +1583,9 @@ sub update_ID3_tags
 		#call mkvTools() when song file type is .mkv to obtain metadata not available with exifTools()
 		if ( $songFile =~ m#\.mkv$#i ) {
 			mkvTools( $num, \%tags, $songFile );
+		} else {
+			exifTools( $num, \%tags, $songFile );
 		}
-		exifTools( $num, \%tags, $songFile );
 	
 		#check if crucial tags have been set, try to determine from filename & path
 		if ( ( ! $tags{title} ) || ( ! $tags{artist} ) || ( ! $tags{track} ) || ( ! $tags{album} ) || ( ! $tags{year} ) || ( ! $tags{length} ) ) {
@@ -1617,14 +1611,14 @@ sub update_ID3_tags
 	
 	#write out close playlist XML tag
 	$writer->endTag( 'playlist' );
-	$writer->end() or badExit( $subName, "Not able to write end() XML instance to \$writer object" );
+	$writer->end() or badExit( $subName, 'Not able to write end() XML instance to $writer object' );
 	
 	#write out new playlist XML
-	createFile( $filePath, $subName, $writer, 'XML playlist' );
+	createFile( $fileFQN, $subName, $writer, 'XML playlist' );
 
-	toLog( $subName, "\n...Created Updated Playlist XML file: '" . $filePath . "'\n\n\n" );
+	toLog( $subName, "\n...Created Updated Playlist XML file: '" . $fileFQN . "'\n\n\n" );
 	toLog( $subName, ' *WARNING*: There were ' . $warn{update_ID3_tags} . " warning(s) for process...\n\n\n" ) if ( $warn{update_ID3_tags} );
-	toLog( undef, "  ...Finished Updating ID3 Tags for XML in: '" . $dirName . "'\n\n" );
+	toLog( undef, "  ...Finished Updating ID3 Tags for XML in: '" . $dirPath . "'\n\n" );
 	#echo status to console
 	binmode( STDOUT, ":encoding(UTF-8)" );
 	print "   Finished Updating ID3 Tags '" . $fileName . "'\n";
@@ -1672,7 +1666,7 @@ sub mkvTools
 	my ( $rawStdErr, $stdErr );
 	run3( $mkvBat, \undef, \undef, \$rawStdErr );
 	$stdErr = decode( $Config{enc_to_system} || 'UTF-8', $rawStdErr );
-	badExit( $subName, "Not able to run 'mkvextract', returned:\n" . $stdErr ) if ( $? || $stdErr);
+	badExit( $subName, "Not able to run 'mkvextract', returned:\n" . $stdErr ) if ( $? || $stdErr );
 
 	#load XML data
 	my $dom = loadXml( $songFileXml, $subName );
@@ -1713,6 +1707,44 @@ sub mkvTools
 
 	deleteFile( $mkvBat, $subName, "'mkvextract'" );
 	deleteFile( $songFileXml, $subName, 'XML data for song' );
+
+	#determine 'title', if not specified previously
+	if ( ! $tagsRef->{title} ) {
+		#set ffprobe command for finding 'title' on song files that don't have the value
+		toLog( $subName, "   - Preparing command for 'ffprobe' to determine 'title'\n" );
+		my @ffprobeArgs = (
+			'"' . $ffprobeCmd . '"',
+			'-v error',
+			'-show_entries format_tags=title',
+			'-of default=noprint_wrappers=1:nokey=1',
+			'"' . $songFile . '"'
+		);
+	
+		#call 'ffprobe' to extract 'title' of song file
+		my ( $rawTitle, $title );
+		#start process to create batch file with 'ffprobe' command
+		my $ffprobeBat = $ENV{TEMP} . $FS . 'ffprobe-title-' . $num . '.bat';
+		my $content = "\n" . 'chcp 65001' . "\n" . 'call ' . join( ' ', @ffprobeArgs );
+		createFile( $ffprobeBat, $subName, $content, "'ffprobe-title' batch" );
+	
+		toLog( $subName, "   - Executing 'ffprobe-title' batch file\n" );
+		my ( $rawStdErr, $stdErr );
+		run3( $ffprobeBat, \undef, \$rawTitle, \$rawStdErr );
+		$stdErr = decode( $Config{enc_to_system} || 'UTF-8', $rawStdErr );
+		warning( $subName, "Not able to run 'ffprobe-title', returned:\n" . $stdErr ) if ( $? || $stdErr );
+		$title = decode( $Config{enc_to_system} || 'UTF-8', $rawTitle );
+
+		#'title' needs some format checks
+		if ( $title =~ m#\n(.+)$# ) {
+			$title = $1;
+		}
+
+		#assign to metadata tag
+		$tagsRef->{title} = $title;
+
+		#clean up temporary files
+		deleteFile( $ffprobeBat, $subName, "'ffprobe-title' batch" );
+	}
 
 	#determine 'bitrate', if not specified previously
 	if ( ! $tagsRef->{bitrate} ) {
@@ -2223,15 +2255,7 @@ sub writeTags
 	my $tmpSongFileName = $songFileName;
 	if ( $tmpSongFileName =~ s#(.)\.(\w\w\w\w?)$#$1_tmp\.$2#i ) {
 		#verifying file is not left open by other process
-		close( $songFilePath . $tmpSongFileName ) if ( testL ( 'e', $songFilePath . $tmpSongFileName ) );
-		close( $songFilePath . $songFileName ) if ( testL ( 'e', $songFilePath . $songFileName ) );
-		renameL ( $songFilePath . $songFileName, $songFilePath . $tmpSongFileName );
-		my $songSysErr = decode( $Config{enc_to_system} || 'UTF-8', $! );
-		my $songOS_Err = decode( $Config{enc_to_system} || 'UTF-8', $^E );
-		sleep 1;
-		if ( ! testL ( 'e', $songFilePath . $tmpSongFileName ) ) {
-			badExit( $subName, "Not able to rename song file: '" . $songFilePath . $songFileName . "' to temp file: '" . $songFilePath . $tmpSongFileName . "', returned:\n" . $songSysErr . "\nand:\n" . $songOS_Err );
-		}
+		renameL ( $songFilePath . $songFileName, $songFilePath . $tmpSongFileName ) or badExit( $subName, "Not able to rename song file: '" . $songFilePath . $songFileName . "' to temp file: '" . $songFilePath . $tmpSongFileName . "'" );
 	}
 
 	#create array of metadata tag args to add in ffmpeg (will splice into command args array)
@@ -2239,9 +2263,43 @@ sub writeTags
 	my @newMeta;
 	foreach my $key ( keys %{$tagsRef} ) {
 		#create variable for metadata key (keys with spaces can cause to fail content test)
-		my $metaKey = $key;
+		my $metaKey;
 		#use Unicode curved double quote in key
-		$metaKey =~ s#"#\N{U+201D}#g;
+		$key =~ s#"#\N{U+201D}#g;
+		$metaKey = $key;
+		#use 'part' & 'sort_with' when .mkv song file type
+		if ( $songFileName =~ m#\.mkv$#i ) {
+			if ( $key =~ m#^track$#i ) {
+				$key = 'part';
+				$metaKey = 'part';
+				$tagsRef->{$key} = $tagsRef->{track};
+				delete $tagsRef->{track};
+			} elsif ( $key =~ m#^titlesortorder$#i ) {
+				$key = 'sort_with';
+				$metaKey = 'sort_with';
+				$tagsRef->{$key} = $tagsRef->{titlesortorder};
+				delete $tagsRef->{titlesortorder};
+			} elsif ( $key =~ m#^titlesort$#i ) {
+				$key = 'sort_with';
+				$metaKey = 'sort_with';
+				$tagsRef->{$key} = $tagsRef->{titlesort};
+				delete $tagsRef->{titlesort};
+			}
+		}
+		if ( $songFileName =~ m#\.m4a$#i ) {
+			#key for 'year' may be: '©day'
+			if ( $key =~ m#^discnumber$#i ) {
+				$key = 'disk';
+				$metaKey = 'disk';
+				$tagsRef->{$key} = $tagsRef->{discnumber};
+				delete $tagsRef->{discnumber};
+			} elsif ( $key =~ m#^albumartist$#i ) {
+				$key = 'album_artist';
+				$metaKey = 'album_artist';
+				$tagsRef->{$key} = $tagsRef->{albumartist};
+				delete $tagsRef->{albumartist};
+			}
+		}
 		#replace any values that contain newlines
 		$tagsRef->{$key} =~ s#\r?\n#,#g;
 		if ( ! $tagsRef->{$key} ) {
@@ -2272,7 +2330,7 @@ sub writeTags
 		#force ID3v2.3 tag version
 		'-id3v2_version 3',
 		#don't return numerous lines of output from 'ffmpeg'
-		'-v quiet',
+		'-v error',
 		#copy timestamp - copy song file, don't encode
 		'-copyts',
 		#for timestamp copy - start timestamp at 0
@@ -2300,8 +2358,11 @@ sub writeTags
 	my ( $rawStdErr, $stdErr );
 	run3( $ffmpegBat, \undef, \undef, \$rawStdErr );
 	$stdErr = decode( $Config{enc_to_system} || 'UTF-8', $rawStdErr );
-	badExit( $subName, "Not able to run 'ffmpeg' for song: '" . $songFileName . "', returned:\n" . $stdErr ) if ( $? || $stdErr );
-
+	#clean error header from 'ffmpeg'
+	$stdErr =~ s#^ffmpeg version.+libswresample[\d\.\s\/]+$##is;
+	if ( $? || $stdErr || ( ! testL ( 's', $songFilePath . $songFileName ) ) ) {
+		badExit( $subName, "Not able to run 'ffmpeg' for song: '" . $songFileName . "', returned:\n" . $stdErr );
+	}
 	#removing temp song file & 'ffmpeg' batch file
 	deleteFile( $songFilePath . $tmpSongFileName, $subName, 'song' );
 	deleteFile( $ffmpegBat, $subName, "'ffmpeg' batch" );
@@ -2317,6 +2378,23 @@ sub warning
 {
 	my ( $funcName, $msg ) = @_;
 
+	#store any returned system error info
+	my $rawSysWarn = $!;
+	my $rawEvalWarn = $@;
+	my $rawOS_Warn = $^E;
+	#decode raw warning to use Unicode
+	my $sysWarn = decode( $Config{enc_to_system} || 'UTF-8', $rawSysWarn );
+	my $evalWarn = decode( $Config{enc_to_system} || 'UTF-8', $rawEvalWarn );
+	my $OS_Warn = decode( $Config{enc_to_system} || 'UTF-8', $rawOS_Warn );
+	if ( $sysWarn ) {
+	  $msg .= "\n\n *Warn with following Perl system error message: " . $sysWarn;
+	}
+	if ( $evalWarn ) {
+	  $msg .= "\n\n *Warn with following Perl eval error message: " . $evalWarn;
+	}
+	if ( $OS_Warn ) {
+	  $msg .= "\n\n *Warn with following Windows error message: " . $OS_Warn;
+	}
 	updStatus( undef, 'Warning...' );
 
 	#set global warn hash with increasing warning count
@@ -2351,7 +2429,7 @@ sub badExit
 	my $evalError = decode( $Config{enc_to_system} || 'UTF-8', $rawEvalError );
 	my $OS_Error = decode( $Config{enc_to_system} || 'UTF-8', $rawOS_Error );
 	if ( $sysError ) {
-	  $error = "\n\n *Failed with following Perl system error message: " . $sysError;
+	  $error .= "\n\n *Failed with following Perl system error message: " . $sysError;
 	}
 	if ( $evalError ) {
 	  $error .= "\n\n *Failed with following Perl eval error message: " . $evalError;
@@ -2400,7 +2478,7 @@ sub tkEnd
 	#close log file
 	endLog( $funcName );
 	undef $log;
-  $log = $dirName . $progName . '.log';
+  $log = $dirPath . $progName . '.log';
 
 	#focus on exit button and reset status
 	$proc = 'Waiting on command...';
@@ -2465,33 +2543,24 @@ sub saveLastVal
 {
 	my ( $dirOS_Err, $dirSysErr, $lastFH );
 
+	#create last value directory, if not exists
 	my $lastValDir = $ENV{APPDATA} . $FS . $progName;
 	if ( ! testL ( 'd', $lastValDir ) ) {
-		mkdirL ( $lastValDir );
-		$dirSysErr = decode( $Config{enc_to_system} || 'UTF-8', $! );
-		$dirOS_Err = decode( $Config{enc_to_system} || 'UTF-8', $^E );
+		mkdirL ( $lastValDir ) or warning( undef, "Not able to create 'lastValue.cfg' directory: '" . $lastValDir . "'" );
 	}
-	if ( ! testL ( 'd', $lastValDir ) ) {
-		warning( undef, "Not able to create 'lastValue.cfg' directory: '" . $lastValDir . "', returned:\n" . $dirSysErr . "\nand:\n" . $dirOS_Err );
-	} else {
-		my $lastFile = $lastValDir . $FS . 'lastValue.cfg';
-		openL ( \$lastFH, '>:encoding(UTF-8)', $lastFile );
-		$dirSysErr = decode( $Config{enc_to_system} || 'UTF-8', $! );
-		$dirOS_Err = decode( $Config{enc_to_system} || 'UTF-8', $^E );
-		if ( ! testL ( 'e', $lastFile ) ) {
-			warning( undef, "Not able to open last value file: '" . $lastFile . "', returned:\n" . $dirSysErr . "\nand:\n" . $dirOS_Err );
-		} else {
-			my $lastValFH = select $lastFH; $| = 1; select $lastValFH;
-			if ( $filePath && $dirName ) {
-				print $lastFH $filePath . "\n" . $dirName;
-			} elsif ( $filePath ) {
-				print $lastFH $filePath;
-			} elsif ( $dirName ) {
-				print $lastFH "\n" . $dirName;
-			}
-			close( $lastFH );
-		}
+
+	my $lastFile = $lastValDir . $FS . 'lastValue.cfg';
+	openL ( \$lastFH, '>:encoding(UTF-8)', $lastFile ) or warning( undef, "Not able to open last value file: '" . $lastFile . "'" );
+	my $lastValFH = select $lastFH; $| = 1; select $lastValFH;
+	if ( $fileFQN && $dirPath ) {
+		print $lastFH $fileFQN . "\n" . $dirPath;
+	} elsif ( $fileFQN ) {
+		print $lastFH $fileFQN;
+	} elsif ( $dirPath ) {
+		print $lastFH "\n" . $dirPath;
 	}
+
+	close( $lastFH );
 }
 
 #----------------------------------------------------------------------------------------------------------
@@ -2506,27 +2575,23 @@ sub readLastVal
 	#only read if value not passed
 	if ( ( testL ( 's', $lastFile ) ) && ( ! $ARGV[0] ) ) {
 		my $lastFH;
-		openL ( \$lastFH, '<:encoding(UTF-8)', $lastFile );
-		my $dirSysErr = decode( $Config{enc_to_system} || 'UTF-8', $! );
-		my $dirOS_Err = decode( $Config{enc_to_system} || 'UTF-8', $^E );
-		if ( ! testL ( 's', $lastFile ) ) {
-			print "\n\n*WARNING: Not able to open last value config file: '" . $lastFile . "', returned:\n" . $dirSysErr . "\nand:\n" . $dirOS_Err . "\n\n";
-		} else {
-			@lastVal = <$lastFH>;
-			close( $lastFH );
-			chomp( @lastVal );
-			$filePath = $lastVal[0];
-			$filePath =~ s#[\/\\]#$FS#g;
-			$dirName = $lastVal[1];
-			$dirName =~ s#[\/\\]#$FS#g;
-			if ( $lastVal[0] ) {
-				( $fileName, $dirName ) = fileparse( abspathL ( $filePath ) );
-				#value returned in 1st line of lastValue.cfg has zero-width character(s) at end of value - rebuild
-				$filePath = $dirName . $fileName;
-			}
-			if ( $dirName !~ m#[\/\\]$# ) {
-				$dirName = $dirName . $FS;
-			}
+		openL ( \$lastFH, '<:encoding(UTF-8)', $lastFile ) or print "\n\n*WARNING: Not able to open last value config file: '" . $lastFile . "'\n\n";
+		@lastVal = <$lastFH>;
+		close( $lastFH );
+
+		#clean up file content
+		chomp( @lastVal );
+		$fileFQN = $lastVal[0];
+		$fileFQN =~ s#[\/\\]#$FS#g;
+		$dirPath = $lastVal[1];
+		$dirPath =~ s#[\/\\]#$FS#g;
+		if ( $lastVal[0] ) {
+			( $fileName, $dirPath ) = fileparse( abspathL ( $fileFQN ) );
+			#value returned in 1st line of lastValue.cfg has zero-width character(s) at end of value - rebuild
+			$fileFQN = $dirPath . $fileName;
+		}
+		if ( $dirPath !~ m#[\/\\]$# ) {
+			$dirPath = $dirPath . $FS;
 		}
 	}
 }
@@ -2544,31 +2609,26 @@ sub startLog
 	my $timeSt = $now->{'date'} . ' at ' . $now->{'time'};
 
 	if ( $funcName ) {
-		if ( testL ( 'd', $dirName ) ) {
-	    $log = $dirName . $funcName . '.log';
+		if ( testL ( 'd', $dirPath ) ) {
+	    $log = $dirPath . $funcName . '.log';
 		} else {
 	  	my $dir = getcwdL();
 	    $log = $dir . $FS . $progName . '.log';
 		}
-		openL ( \$funcLogFH, '>:encoding(UTF-8)', $log );
-		if ( ! fileno( $funcLogFH ) ) {
-			my $funcSysErr = decode( $Config{enc_to_system} || 'UTF-8', $! );
-			my $funcOS_Err = decode( $Config{enc_to_system} || 'UTF-8', $^E );
-			badExit( $funcName, "Not able to create log file: '" . $log . "', returned:\n" . $funcSysErr . "\nand:\n" . $funcOS_Err );
-		} else {
-			#redirect STDERR to log file
-			open( STDERR, '>>:encoding(UTF-8)', $log ) or warning( undef, 'Not able to redirect STDERR' );
-			my $oldfh = select $funcLogFH; $| = 1; select $oldfh;
-		}
+		openL ( \$funcLogFH, '>:encoding(UTF-8)', $log ) or badExit( $funcName, "Not able to create log file: '" . $log . "'" );
+		#redirect STDERR to log file
+		open( STDERR, '>>:encoding(UTF-8)', $log ) or warning( undef, 'Not able to redirect STDERR' );
+		my $oldfh = select $funcLogFH; $| = 1; select $oldfh;
 
 		toLog( $funcName, "$Sep\nFunction: $funcName\n\tDate: $timeSt\n$Sep" );
 	} else {
-    if ( testL ( 'd', $dirName ) ) {
-	    $log = $dirName . $progName . '.log';
+    if ( testL ( 'd', $dirPath ) ) {
+	    $log = $dirPath . $progName . '.log';
 	  } else {
 	  	my $dir = getcwdL();
 	    $log = $dir . $FS . $progName . '.log';
-	    print "\n*NOTE: The global log file is saved in current directory as:\n  " . $log . "\n\n";
+			#if directory not populated in GUI, note to console about current global log location
+	    print "\n *NOTE: The global log file is saved in current directory as:\n  " . $log . "\n\n";
 	  }
 		openL ( \$logFH, '>:encoding(UTF-8)', $log );
 		if ( ! fileno( $logFH ) ) {
