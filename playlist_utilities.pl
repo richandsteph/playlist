@@ -92,6 +92,17 @@
 #                                to replace certain different tags / changed logging parameter in 
 #                                writeTags() to only log errors / added test of song file size in 
 #                                writeTags() to check for errors
+#         1.9 - 11 Feb 2026	 RAD removed completion test for XML playlist file in make_XML_playlist() / 
+#                                changed completion test for .m3u file in make_m3u() to check for $fileFQN 
+#                                / changed button order in GUI, changed button text to 'Make XML Playlist' 
+#                                & 'Making Playlist...', & changed width of 'Make XML Playlist' button / 
+#                                added test for current directory vs. previous directory in tkGetFile() to 
+#                                print logging message to console / removed mkvTools() calls - using 
+#                                exifTools() for all metadata reading / removed command-line call for 
+#                                utility - using Perl modules for exifTool instead / added use of ExifTool 
+#                                config file / changed check for no tag values to use 'defined' in tag 
+#                                tests in make_XML_playlist() & update_ID3_tags() / refactored some 
+#                                variable names for clarity
 #
 #
 #   TO-DO:
@@ -99,7 +110,7 @@
 #
 #**********************************************************************************************************
 
-my $Version = '1.8';
+my $Version = '1.9';
 
 use strict;
 use warnings;
@@ -110,10 +121,10 @@ use open ':std', IO => ':raw :encoding(UTF-8)';
 use Carp qw( carp croak longmess shortmess );
 use Config;
 use Data::Dumper qw( Dumper );
-use Encode qw( decode );
+use Encode qw( decode encode );
 use File::Basename qw( fileparse );
 #uncomment line below to specify config file for ExifTool
-#BEGIN { $Image::ExifTool::configFile = 'C:\Users\rich\.ExifTool_config' }
+BEGIN { $Image::ExifTool::configFile = 'C:\Users\rich\.ExifTool_config' }
 use Image::ExifTool qw( :Public );
 use IPC::Run3;
 use JSON;
@@ -147,7 +158,7 @@ use constant TK_FNT_I					=> "-*-{Lucida Sans Unicode}-medium-i-normal-*-12-*";
 umask 0000;
 
 #global variables
-my ( $dirPath, $fileFQN, $fileName, $log, $stat );
+my ( $dirPath, $fileFQN, $fileName, $log );
 my $FS = '\\';
 my $Sep = '-' x 110;
 my $SEP = '=' x 110;
@@ -169,6 +180,7 @@ my $mkvCmd = 'C:\Program Files\MKVToolNix\mkvextract.exe';
 
 #Tk variables
 my $proc = 'Waiting on command...';
+my $stat;
 
 #array list of possible ID3 tag names in nested arrays (priority is 1st item in sub-array)
 my @listOfTagArrays = (
@@ -606,20 +618,20 @@ sub tkMainWindow
 		-padx								=> '2',
 		-pady								=> '0'
 	);
-	$M->{'renumber'} = $buttons1->Button(
-		-text								=> 'Renumber',
+	$M->{'make_XML_playlist'} = $buttons1->Button(
+		-text								=> 'Make XML Playlist',
 		-font								=> TK_FNT_B,
-		-command						=> \&renumber,
+		-command						=> \&make_XML_playlist,
 		-borderwidth				=> '4',
 		-bg									=> TK_COLOR_BG,
 		-fg									=> TK_COLOR_FG,
-		-activebackground		=> TK_COLOR_TURQ,
+		-activebackground		=> TK_COLOR_ABG,
 		-disabledforeground => TK_COLOR_GREYBUT,
-		-width							=> '11'
+		-width							=> '16'
 	)->pack(
 		-side								=> 'left',
 		-padx								=> '2',
-		-pady								=> '0'
+		-pady								=> '8'
 	);
 	#buttons2 frame
 	$M->{'make_m3u'} = $buttons2->Button(
@@ -637,20 +649,20 @@ sub tkMainWindow
 		-padx								=> '2',
 		-pady								=> '8'
 	);
-	$M->{'make_XML_playlist'} = $buttons2->Button(
-		-text								=> 'Create XML',
+	$M->{'renumber'} = $buttons2->Button(
+		-text								=> 'Renumber',
 		-font								=> TK_FNT_B,
-		-command						=> \&make_XML_playlist,
+		-command						=> \&renumber,
 		-borderwidth				=> '4',
 		-bg									=> TK_COLOR_BG,
 		-fg									=> TK_COLOR_FG,
-		-activebackground		=> TK_COLOR_ABG,
+		-activebackground		=> TK_COLOR_TURQ,
 		-disabledforeground => TK_COLOR_GREYBUT,
-		-width							=> '14'
+		-width							=> '11'
 	)->pack(
 		-side								=> 'left',
 		-padx								=> '2',
-		-pady								=> '8'
+		-pady								=> '0'
 	);
 	$M->{'exit'} = $buttons2->Button(
 		-text							=> 'Exit',
@@ -813,12 +825,23 @@ sub tkGetFile
 #----------------------------------------------------------------------------------------------------------
 {
 	my ( $getFilePath ) = @_;
+	my ( $currentDir, $dir, $file );
 
-	my ( $dir, $file );
+	$currentDir = $dirPath;
+	#prepare directory for match expression
+	$currentDir =~ s#[\/\\]#\/#g;
 	if ( testL ( 'e', $getFilePath ) ) {
 		( $file, $dir ) = fileparse( abspathL ( $getFilePath ) );
+		#prepare directory for match expression
+		$dir =~ s#[\/\\]#\/#g;
+		$dir =~ s#\$#\\\$#g;
 		#if file already populated & changed (which affects directory), note to console about different global log location
-		print "\n *NOTE: The global log file is saved in selected directory as:\n  " . $log . "\n\n";
+		if ( $currentDir !~ m#^$dir$#i ) {
+			print "\n *NOTE: The global log file is saved in directory as:\n  " . $log . "\n\n";
+		}
+		#return $dir back
+		$dir =~ s#\\\$#\$#g;
+		$dir =~ s#[\/\\]#$FS#g;
 	}
 
 	$getFilePath = $M->{'window'}->getOpenFile(
@@ -833,6 +856,15 @@ sub tkGetFile
 		( $fileName, $dirPath ) = fileparse( abspathL ( $fileFQN ) );
 		if ( $dirPath !~ m#[\/\\]$# ) {
 			$dirPath = $dirPath . $FS;
+		}
+
+		#prepare directory for match expression
+		$dir = $dirPath;
+		$dir =~ s#[\/\\]#\/#g;
+		$dir =~ s#\$#\\\$#g;
+		#if file already populated & changed (which affects directory), note to console about different global log location
+		if ( $currentDir !~ m#^$dir$#i ) {
+			print "\n *NOTE: The global log file is saved in directory as:\n  " . $log . "\n\n";
 		}
 	}
 }
@@ -884,7 +916,7 @@ sub make_XML_playlist
 		-activebackground => TK_COLOR_BG
 	);
 	$M->{'make_XML_playlist'}->configure(
-		-text							=> 'Creating XML...',
+		-text							=> 'Making Playlist...',
 		-font							=> TK_FNT_B,
 		-state						=> 'disabled',
 		-fg								=> TK_COLOR_GREYBUT,
@@ -959,15 +991,11 @@ sub make_XML_playlist
 		#set per song hash for tag metadata
 		my %tags;
 	
-		#call mkvTools() when song file type is .mkv to obtain metadata not available with exifTools()
-		if ( $songFile =~ m#\.mkv$#i ) {
-			mkvTools( $num, \%tags, $songFile );
-		} else {
-			exifTools( $num, \%tags, $songFile );
-		}
+		#read song metadata
+		exifTools( $num, \%tags, $songFile );
 
 		#check if crucial tags have been set, try to determine from filename & path
-		if ( ( ! $tags{title} ) || ( ! $tags{artist} ) || ( ! $tags{track} ) || ( ! $tags{album} ) || ( ! $tags{year} ) || ( ! $tags{length} ) ) {
+		if ( ( ! defined $tags{title} ) || ( ! defined $tags{artist} ) || ( ! defined $tags{track} ) || ( ! defined $tags{album} ) || ( ! defined $tags{length} ) ) {
 			extractTags( $num, \%tags, $songFile );
 		}
 
@@ -1073,13 +1101,9 @@ sub make_XML_playlist
 	print "   Finished Creating XML Playlist '" . $xmlName . "'\n";
 
 	#process end
-	if ( testL ( 'e', $xmlPlaylistFile ) ) {
-		updStatus( "Finished Creating XML Playlist: '" . $xmlPlaylistFile . "'" );
-	} else {
-		my $folderNm;
-		( $folderNm ) = fileparse( abspathL ( $dirPath ) );
-		updStatus( "Finished Creating XML Playlist(s) from: \"" . $folderNm . "\" folder" );
-	}
+	my $folderNm;
+	( $folderNm ) = fileparse( abspathL ( $dirPath ) );
+	updStatus( "Finished Creating XML Playlist(s) from: \"" . $folderNm . "\" folder" );
 
 	tkEnd( $subName );
 }
@@ -1133,7 +1157,7 @@ sub make_m3u
 		-activebackground => TK_COLOR_BG
 	);
 	$M->{'make_XML_playlist'}->configure(
-		-text							=> 'Create XML',
+		-text							=> 'Make XML Playlist',
 		-font							=> TK_FNT_BI,
 		-state						=> 'disabled',
 		-fg								=> TK_COLOR_GREYBUT,
@@ -1232,7 +1256,7 @@ sub make_m3u
 	}
 	
 	#process end
-	if ( testL ( 'e', $m3uFilePath ) ) {
+	if ( $fileFQN ) {
 		updStatus( "Finished Making .m3u Playlist: \"" . $m3uFileName . "\"" );
 	} else {
 		my $folderNm;
@@ -1282,7 +1306,7 @@ sub renumber
 		-activebackground => TK_COLOR_BG
 	);
 	$M->{'make_XML_playlist'}->configure(
-		-text							=> 'Create XML',
+		-text							=> 'Make XML Playlist',
 		-font							=> TK_FNT_BI,
 		-state						=> 'disabled',
 		-fg								=> TK_COLOR_GREYBUT,
@@ -1480,7 +1504,7 @@ sub update_ID3_tags
 		-activebackground => TK_COLOR_BG
 	);
 	$M->{'make_XML_playlist'}->configure(
-		-text							=> 'Create XML',
+		-text							=> 'Make XML Playlist',
 		-font							=> TK_FNT_BI,
 		-state						=> 'disabled',
 		-fg								=> TK_COLOR_GREYBUT,
@@ -1543,7 +1567,7 @@ sub update_ID3_tags
 		updStatus( 'Processing song no. ' . $num );
 
 		#set per song hash for tag metadata
-		my ( %tags, $songFile, $songFileName, $songFilePath );
+		my ( %tags, $pathContent, $songFileName );
 		
 		#search empty elements and add empty node to avoid collapsed tag output
 		foreach my $subNode ( $songNode->findnodes( '*' ) ) {
@@ -1553,17 +1577,17 @@ sub update_ID3_tags
 	
 			#set each tag value from XML, as priority over other tool extraction
 			if ( $nodeName =~ m#^path$# ) {
-				#set $songFile from <path>
-				$songFile = $nodeContent if ( $nodeContent );
-				( $songFileName ) = fileparse( abspathL ( $songFile ) );
-				if ( testL ( 'e', $songFile ) ) {
-					toLog( $subName, '...Processing song no. ' . $num . ": '" . $songFile . "'\n" );
+				#set $pathContent from <path>
+				$pathContent = $nodeContent if ( $nodeContent );
+				( $songFileName ) = fileparse( abspathL ( $pathContent ) );
+				if ( testL ( 'e', $pathContent ) ) {
+					toLog( $subName, '...Processing song no. ' . $num . ": '" . $pathContent . "'\n" );
 					binmode( STDOUT, ":encoding(UTF-8)" );
 					print '     - processing song no. ' . $num . ": '" . $songFileName . "'\n";
 				} else {
 					binmode( STDOUT, ":encoding(UTF-8)" );
 					print '    Song no. ' . $num . " : '" . $songFileName . "' does not exist\n";
-					warning( $subName, 'Song no. ' . $num . " : '" . $songFile . "' does not exist" );
+					warning( $subName, 'Song no. ' . $num . " : '" . $pathContent . "' does not exist" );
 					tkEnd( $subName );
 					return();
 				}
@@ -1580,20 +1604,16 @@ sub update_ID3_tags
 			}
 		}
 	
-		#call mkvTools() when song file type is .mkv to obtain metadata not available with exifTools()
-		if ( $songFile =~ m#\.mkv$#i ) {
-			mkvTools( $num, \%tags, $songFile );
-		} else {
-			exifTools( $num, \%tags, $songFile );
-		}
+		#read metadata from song
+		exifTools( $num, \%tags, $pathContent );
 	
 		#check if crucial tags have been set, try to determine from filename & path
-		if ( ( ! $tags{title} ) || ( ! $tags{artist} ) || ( ! $tags{track} ) || ( ! $tags{album} ) || ( ! $tags{year} ) || ( ! $tags{length} ) ) {
-			extractTags( $num, \%tags, $songFile );
+		if ( ( ! defined $tags{title} ) || ( ! defined $tags{artist} ) || ( ! defined $tags{track} ) || ( ! defined $tags{album} ) || ( ! defined $tags{length} ) ) {
+			extractTags( $num, \%tags, $pathContent );
 		}
 	
 		#call method to clean and sort metadata tags
-		cleanTags( \%tags, $songFile );
+		cleanTags( \%tags, $pathContent );
 	
 		#check crucial tags in @listOfXmlTags for values
 		toLog( $subName, "   - Scanning tags to see if any desired tags are not defined\n" );
@@ -1606,7 +1626,7 @@ sub update_ID3_tags
 		}
 		
 		#write metadata tags to song file
-		writeTags( $num, $writer, \%tags, $songFile, $songNode );
+		writeTags( $num, $writer, \%tags, $pathContent, $songNode );
 	}
 	
 	#write out close playlist XML tag
@@ -1616,15 +1636,15 @@ sub update_ID3_tags
 	#write out new playlist XML
 	createFile( $fileFQN, $subName, $writer, 'XML playlist' );
 
-	toLog( $subName, "\n...Created Updated Playlist XML file: '" . $fileFQN . "'\n\n\n" );
+	toLog( $subName, "\n...Created Updated XML Playlist file: '" . $fileFQN . "'\n\n\n" );
 	toLog( $subName, ' *WARNING*: There were ' . $warn{update_ID3_tags} . " warning(s) for process...\n\n\n" ) if ( $warn{update_ID3_tags} );
-	toLog( undef, "  ...Finished Updating ID3 Tags for XML in: '" . $dirPath . "'\n\n" );
+	toLog( undef, "  ...Finished Updating ID3 Tags in: '" . $dirPath . "'\n\n" );
 	#echo status to console
 	binmode( STDOUT, ":encoding(UTF-8)" );
-	print "   Finished Updating ID3 Tags '" . $fileName . "'\n";
+	print "   Finished Updating ID3 Tags in '" . $fileName . "'\n";
 
 	#process end
-	updStatus( "Finished Updating ID3 Tags '" . $fileName . "'" );
+	updStatus( "Finished Updating ID3 Tags in '" . $fileName . "'" );
 	tkEnd( $subName );
 }
 
@@ -1677,7 +1697,6 @@ sub mkvTools
 		my $tagValue = $xmlNode->findvalue( './String' );
 		my $lcTagName = lc( $tagName );
 		foreach my $tagArrayRef ( @listOfTagArrays ) {
-			my $tagArrayPrimary = lc( ${$tagArrayRef}[0] );
 			if ( grep /^$lcTagName$/, @{$tagArrayRef} ) {
 				$tagsRef->{$lcTagName} = $tagValue unless ( $tagsRef->{$lcTagName} );
 			}
@@ -1688,13 +1707,15 @@ sub mkvTools
 		my $tagsRowRef = $listOfTagArrays[$tagsRow];
 		#loop through inner array in reverse for each tag name, so priority is last (lowest array item) value set
 		my $primaryTagName = $listOfTagArrays[$tagsRow][0];
+		my $primaryTagValue;
 		#save initial base value
-		my $primaryTagValue = $tagsRef->{$primaryTagName};
+		for my $tagsCol ( 0 .. $#{$listOfTagArrays[0]} ) {
+			my $tagName = $listOfTagArrays[$tagsRow][$tagsCol];
+			$primaryTagValue = $tagsRef->{$tagName} unless ( $primaryTagValue );
+		}
 		for ( my $tagsCol = $#{$tagsRowRef}; $tagsCol >= 0; $tagsCol-- ) {
 			my $tagName = $listOfTagArrays[$tagsRow][$tagsCol];
-			if ( defined $tagsRef->{$tagName} ) {
-				$tagsRef->{$primaryTagName} = $tagsRef->{$tagName};
-			}
+			$tagsRef->{$primaryTagName} = $tagsRef->{$tagName} if ( defined $tagsRef->{$tagName} );
 		}
 		#reset base value to starting value, before setting all others
 		$tagsRef->{$primaryTagName} = $primaryTagValue if ( $primaryTagValue );
@@ -1709,7 +1730,7 @@ sub mkvTools
 	deleteFile( $songFileXml, $subName, 'XML data for song' );
 
 	#determine 'title', if not specified previously
-	if ( ! $tagsRef->{title} ) {
+	if ( ! defined $tagsRef->{title} ) {
 		#set ffprobe command for finding 'title' on song files that don't have the value
 		toLog( $subName, "   - Preparing command for 'ffprobe' to determine 'title'\n" );
 		my @ffprobeArgs = (
@@ -1747,7 +1768,7 @@ sub mkvTools
 	}
 
 	#determine 'bitrate', if not specified previously
-	if ( ! $tagsRef->{bitrate} ) {
+	if ( ! defined $tagsRef->{bitrate} ) {
 		#set ffprobe command for finding 'bitrate' on song files that don't have the value
 		toLog( $subName, "   - Preparing command for 'ffprobe' to determine 'bitrate'\n" );
 		my @ffprobeArgs = (
@@ -1808,74 +1829,44 @@ sub exifTools
 	toLog( $subName, "   - Preparing for 'ExifTool' to export metadata tags from song file\n" );
 	updStatus( "Running 'exifTool' to export metadata" );
 
-	#arguments for calling 'exiftool' command-line program
-	my $exifToolArgsFile = $ENV{TEMP} . $FS . 'exiftoolargs-' . $num . '.txt';
-	my @exifToolArgs = (
-		#exiftool command-line program
-		'"' . $exifToolCmd . '"',
-		#read arguments from text file
-		'-@ ' . '"' . $exifToolArgsFile . '"'
-	);
-	my @exifToolFileArgs = (
-		#set encoding for filenames, also sets wide-character I/O
-		'-charset' . "\n" . 'filename=UTF8' . "\n",
-		#set encoding for IPTC values
-		'-charset' . "\n" . 'exif=UTF8' . "\n",
-		#set encoding for exifTool
-		'-charset' . "\n" . 'exiftool=UTF8' . "\n",
-		#set encoding of ID3 metadata
-		'-charset' . "\n" . 'id3=UTF8' . "\n",
-		#allow duplicate tags
-		'-duplicates' . "\n",
-		#quiet processing
-		'-quiet' . "\n",
-		#output in json format
-		'-json' . "\n",
-		#convert array data to string
-		'-separator' . "\n" . ', ' . "\n",
-		#get tag values from song file
-		$songFile
-	);
-
-	#start process to create batch file for calling 'exiftool' for files/folders with Unicode characters
-	my $jsonBat = $ENV{TEMP} . $FS . 'exiftool-' . $num . '.bat';
-	my $content = "\n" . 'chcp 65001' . "\n" . 'call ' . join( ' ', @exifToolArgs );
-	createFile( $jsonBat, $subName, $content, "'exiftool' batch" );
-	$content = join( "\n", @exifToolFileArgs );
-	createFile( $exifToolArgsFile, $subName, $content, "'exiftool' arguments" );
-
-	#execute batch file wrapper to call 'exiftool' command batch file
-	toLog( $subName, "   - Executing batch file for 'exiftool'\n" );
-	my ( $songFileJson, $rawStdErr, $stdErr );
-	run3( $jsonBat, \undef, \$songFileJson, \$rawStdErr );
-	$stdErr = decode( $Config{enc_to_system} || 'UTF-8', $rawStdErr );
-	badExit( $subName, "ExifTool is not able to read the metadata of the file, returned:\n" . $stdErr ) if ( $? || $stdErr );
-	my $jsonTxt;
-	if ( $songFileJson =~ m#(\n\[\{.+)#s ) {
-		$jsonTxt = $1;
-	}
-	#parse json data for song file
-	my $json = JSON->new->utf8();
-	my $jsonDataRef = $json->decode( $jsonTxt );
-	badExit( $subName, "JSON data not created for song file: '" . $songFile . "'" ) unless ( $jsonDataRef );
-
-	#create hashref for hash of tags => values
-	my $tagsInnerHashRef = \%{${$jsonDataRef}[0]};
-	foreach my $key ( keys %{$tagsInnerHashRef} ) {
-		#set to lowercase version of keys
+	#use ExifTool Perl modules
+	my ( @exifTagList, $exifHashRef );
+	#encode filename for use by ExifTool with Unicode characters
+	my $encSongFile = encode( 'utf8', $songFile );
+	my $exifTool = Image::ExifTool->new;
+	$exifHashRef = $exifTool->ImageInfo( $encSongFile );
+	foreach my $key ( keys %{$exifHashRef} ) {
+		my $decodedVal = decode( $Config{enc_to_system} || 'UTF-8', ${$exifHashRef}{$key} );
 		my $lcKey = lc( $key );
-		#check MKV tag names and substitute to actual tag name
-		foreach my $jsonRef ( @listOfTagArrays ) {
-			my $tagArrayPrimary = ${$jsonRef}[0];
-			if ( grep /^$lcKey$/, @{$jsonRef} ) {
-				$tagsRef->{$tagArrayPrimary} = $tagsInnerHashRef->{$key} unless ( $tagsRef->{$tagArrayPrimary} );
+		foreach my $tagArrayRef ( @listOfTagArrays ) {
+			if ( grep /^$lcKey$/, @{$tagArrayRef} ) {
+				$tagsRef->{$lcKey} = $decodedVal unless ( $tagsRef->{$lcKey} );
 			}
 		}
 	}
-
-	#clean up temporary files
-	deleteFile( $jsonBat, $subName, "'exiftool' batch" );
-	deleteFile( $exifToolArgsFile, $subName, "'exiftool' arguments" );
+	#loop through array of arrays for possible tags to set tag's value, according to priority of array
+	for my $tagsRow ( 0 .. $#listOfTagArrays ) {
+		my $tagsRowRef = $listOfTagArrays[$tagsRow];
+		#loop through inner array in reverse for each tag name, so priority is last (lowest array item) value set
+		my $primaryTagName = $listOfTagArrays[$tagsRow][0];
+		my $primaryTagValue;
+		#save initial base value, or higher if lower not available
+		for my $tagsCol ( 0 .. $#{$listOfTagArrays[0]} ) {
+			my $tagName = $listOfTagArrays[$tagsRow][$tagsCol];
+			$primaryTagValue = $tagsRef->{$tagName} unless ( $primaryTagValue );
+		}
+		for ( my $tagsCol = $#{$tagsRowRef}; $tagsCol >= 0; $tagsCol-- ) {
+			my $tagName = $listOfTagArrays[$tagsRow][$tagsCol];
+			$tagsRef->{$primaryTagName} = $tagsRef->{$tagName} if ( defined $tagsRef->{$tagName} );
+		}
+		#reset base value to starting value, before setting all others
+		$tagsRef->{$primaryTagName} = $primaryTagValue if ( $primaryTagValue );
+		for my $tagsCol ( 0 .. $#{$tagsRowRef} ) {
+			my $tagName = $listOfTagArrays[$tagsRow][$tagsCol];
+			#only set when original had a value
+			$tagsRef->{$tagName} = $tagsRef->{$primaryTagName} if ( $tagsRef->{$tagName} );
+		}
+	}
 }
 
 #----------------------------------------------------------------------------------------------------------
@@ -1922,11 +1913,11 @@ sub cleanTags
 			#correct 'AC/DC'
 			$tagsRef->{$key} =~ s#^AC[_ ]DC$#AC\/DC#i;
 			#set 'albumartist' if not specified
-			if ( ! $tagsRef->{albumartist} ) {
+			if ( ! defined $tagsRef->{albumartist} ) {
 				$tagsRef->{albumartist} = $tagsRef->{$key};
 			}
 			#set 'artistsortorder' if not specified
-			if ( ! $tagsRef->{artistsortorder} ) {
+			if ( ! defined $tagsRef->{artistsortorder} ) {
 				$tagsRef->{artistsortorder} = $tagsRef->{$key};
 				#remove extra artist info
 				$tagsRef->{artistsortorder} =~ s#^([^;]+)(?<!&amp);.*$#$1#;
@@ -1934,11 +1925,11 @@ sub cleanTags
 				$tagsRef->{artistsortorder} =~ s#^(the|a|an)\s+(.+)#$2#i;
 			}
 			#set 'band' if not specified, when it exists already
-			if ( ( exists $tagsRef->{band} ) && ( ! $tagsRef->{band} ) ) {
+			if ( ( exists $tagsRef->{band} ) && ( ! defined $tagsRef->{band} ) ) {
 				$tagsRef->{band} = $tagsRef->{$key};
 			}
 			#set 'ensemble' if not specified, when it exists already
-			if ( ( exists $tagsRef->{ensemble} ) && ( ! $tagsRef->{ensemble} ) ) {
+			if ( ( exists $tagsRef->{ensemble} ) && ( ! defined $tagsRef->{ensemble} ) ) {
 				$tagsRef->{ensemble} = $tagsRef->{$key};
 			}
 			#rename certain tags to .m4a or .mkv specific tags
@@ -1951,7 +1942,7 @@ sub cleanTags
 			}
 		} elsif ( $key =~ m#^title$# ) {
 			#set 'titlesortorder' if not specified
-			if ( ! $tagsRef->{titlesortorder} ) {
+			if ( ! defined $tagsRef->{titlesortorder} ) {
 				$tagsRef->{titlesortorder} = $tagsRef->{$key};
 				#strip starting articles
 				$tagsRef->{titlesortorder} =~ s#^(the|a|an)\s+(.+)#$2#i;
@@ -1962,14 +1953,14 @@ sub cleanTags
 			#remove extra artist info
 			$tagsRef->{$key} =~ s#^([^;]+)(?<!&amp);.*$#$1#;
 			#set 'albumartistsortorder' if not specified
-			if ( ! $tagsRef->{albumartistsortorder} ) {
+			if ( ! defined $tagsRef->{albumartistsortorder} ) {
 				$tagsRef->{albumartistsortorder} = $tagsRef->{$key};
 				#strip starting articles
 				$tagsRef->{albumartistsortorder} =~ s#^(the|a|an)\s+(.+)#$2#i;
 			}
 		} elsif ( $key =~ m#^album$# ) {
 			#set 'albumsortorder' if not specified
-			if ( ! $tagsRef->{albumsortorder} ) {
+			if ( ! defined $tagsRef->{albumsortorder} ) {
 				$tagsRef->{albumsortorder} = $tagsRef->{$key};
 				#strip starting articles
 				$tagsRef->{albumsortorder} =~ s#^(the|a|an)\s+(.+)#$2#i;
@@ -2015,19 +2006,23 @@ sub cleanTags
 				$tagsRef->{$key} = '';
 			}
 		} elsif ( $key =~ m#^length$#i ) {
-			if ( ( ! $tagsRef->{$key} ) && ( defined $tagsRef->{duration} ) ) {
+			if ( ( ! defined $tagsRef->{$key} ) && ( defined $tagsRef->{duration} ) ) {
 				$tagsRef->{$key} = $tagsRef->{duration};
 			}
-			#length is empty
 			if ( defined $tagsRef->{$key} ) {
+				unless ( $tagsRef->{$key} =~ m#^\d+$# ) {
+					if ( defined $tagsRef->{duration} ) {
+						$tagsRef->{$key} = $tagsRef->{duration};
+						#remove 'duration'
+						delete $tagsRef->{duration};
+					}
+				}
 				#if 'length' set to approximate value, clean up
 				if ( $tagsRef->{$key} =~ m#\(approx\)#i ) {
 						$tagsRef->{$key} =~ s#^(.+)\s*\(approx\)\s*$#$1#i;
 				} elsif ( $tagsRef->{$key} =~ m#^0\.# ) {
-					undef $tagsRef->{$key};
+					delete $tagsRef->{$key};
 				}
-				#remove 'duration'
-				delete $tagsRef->{duration};
 				#length value can be given in HH:MM:SS format
 				my ( $minutes, $seconds );
 				if ( $tagsRef->{$key} =~ m#^(\d+:\d+:\d+\.?\d*)# ) {
@@ -2048,6 +2043,7 @@ sub cleanTags
 				delete $tagsRef->{minutes};
 				$tagsRef->{minutes} = $minutes . ':' . $remSecs;
 			} else {
+				#length is empty
 				warning( $subName, "'length' tag has no value" );
 			}
 		} else {
@@ -2079,36 +2075,36 @@ sub extractTags
 	$subName =~ s#main::##;
 	toLog( $subName, "   - <title> or <artist> (and/or other) tags have not been set, attempting to set from filename & path\n" );
 
-	my ( $songFileName, $songFilePath ) = fileparse( abspathL ( $songFile ) );
+	my ( $songFileName, $songFileDir ) = fileparse( abspathL ( $songFile ) );
 	updStatus( "Determining tags in: '" . $songFileName . "'" );
 
 	#determine values from path of song file, using expected 'Music' directory
-	if ( $songFilePath =~ m#\\Music\\([^\\]+)\\([^\\]+)\\$#i ) {
+	if ( $songFileDir =~ m#\\Music\\([^\\]+)\\([^\\]+)\\$#i ) {
 		#song file is inside 'Album'\'Artist'\song file format
 		my $artist = $1;
 		my $album = $2;
 		#add escape '\' to square brackets for match expression
 		my $albumMatch = $album;
 		$albumMatch =~ s#([\(\)\[\]\*\+])#\$1#g;
-		$tagsRef->{artist} = $artist if ( ! $tagsRef->{artist} );
+		$tagsRef->{artist} = $artist if ( ! defined $tagsRef->{artist} );
 		#determine if directory is actually a compilation with 'Disc' folders
 		if ( ( $artist =~ m#^$albumMatch$#i ) || ( $album =~ m#^dis[ck]\s*\d+$#i ) ) {
-			$tagsRef->{album} = $artist if ( ! $tagsRef->{album} );
+			$tagsRef->{album} = $artist if ( ! defined $tagsRef->{album} );
 		} else {
-			$tagsRef->{album} = $album if ( ! $tagsRef->{album} );
+			$tagsRef->{album} = $album if ( ! defined $tagsRef->{album} );
 		}
 		#correct 'AC/DC'
 		$tagsRef->{artist} =~ s#^AC[_ ]DC$#AC\/DC#i;
-		if ( ! $tagsRef->{albumartist} ) {
+		if ( ! defined $tagsRef->{albumartist} ) {
 			$tagsRef->{albumartist} = $tagsRef->{artist};
 			#remove extra artist info
 			$tagsRef->{albumartist} =~ s#^([^;]+)(?<!&amp);.*$#$1#;
 		}
-	} elsif ( $songFilePath =~ m#\\Music\\([^\\]+)\\$#i ) {
+	} elsif ( $songFileDir =~ m#\\Music\\([^\\]+)\\$#i ) {
 		#song file is inside 'Album\song file' format
-		$tagsRef->{artist} = $1 if ( ! $tagsRef->{artist} );
-		$tagsRef->{album} = $1 if ( ! $tagsRef->{album} );
-		$tagsRef->{albumartist} = $1 if ( ! $tagsRef->{albumartist} );
+		$tagsRef->{artist} = $1 if ( ! defined $tagsRef->{artist} );
+		$tagsRef->{album} = $1 if ( ! defined $tagsRef->{album} );
+		$tagsRef->{albumartist} = $1 if ( ! defined $tagsRef->{albumartist} );
 		#correct 'AC/DC'
 		$tagsRef->{artist} =~ s#^AC[_ ]DC$#AC\/DC#i;
 		#remove extra artist info
@@ -2118,12 +2114,12 @@ sub extractTags
 	}
 
 	if ( $songFileName =~ m#((\d)-)?(\d*)\s*-?\s*(.+)\.(aac|alac|flac|m4a|mka|mkv|mp3|ogg|wma)$#i ) {
-		$tagsRef->{title} = $4 if ( ! $tagsRef->{title} );
-		$tagsRef->{track} = $3 if ( ! $tagsRef->{track} );
-		$tagsRef->{discnumber} = $2 if ( ( $2 ) && ( ! $tagsRef->{discnumber} ) );
+		$tagsRef->{title} = $4 if ( ! defined $tagsRef->{title} );
+		$tagsRef->{track} = $3 if ( ! defined $tagsRef->{track} );
+		$tagsRef->{discnumber} = $2 if ( ( $2 ) && ( ! defined $tagsRef->{discnumber} ) );
 	}
 
-	if ( ( ! $tagsRef->{length} ) && ( ! $tagsRef->{duration} ) ) {
+	if ( ( ! defined $tagsRef->{length} ) && ( ! defined $tagsRef->{duration} ) ) {
 		#set ffprobe command for finding 'length' on song files that don't have the value
 		toLog( $subName, "   - Preparing command for 'ffprobe' to determine 'length'\n" );
 		my @ffprobeArgs = (
@@ -2159,13 +2155,13 @@ sub extractTags
 		#clean up temporary files
 		deleteFile( $ffprobeBat, $subName, "'ffprobe-length' batch" );
 
-		if ( ( ! $tagsRef->{title} ) || ( ! $tagsRef->{artist} ) || ( ! $tagsRef->{track} ) || ( ! $tagsRef->{album} ) || ( ! $tagsRef->{year} ) || ( ! $tagsRef->{length} ) ) {
+		if ( ( ! defined $tagsRef->{title} ) || ( ! defined $tagsRef->{artist} ) || ( ! defined $tagsRef->{track} ) || ( ! defined $tagsRef->{album} ) || ( ! defined $tagsRef->{length} ) ) {
 			warning( $subName, 'Could not determine <title>, <artist>, and/or possibly other necessary tags' );
 		}
 	}
 
 	#set 'discnumber' to default value, if not present
-	if ( ! $tagsRef->{discnumber} ) {
+	if ( ! defined $tagsRef->{discnumber} ) {
 		$tagsRef->{discnumber} = 1;
 	}
 }
@@ -2251,11 +2247,11 @@ sub writeTags
 
 	#prepare file for ffmpeg to write metadata (can't write out to self) - copy original to temp file
 	toLog( $subName, "   - Creating temporary song file for 'ffmpeg' to use as original song file\n" );
-	my ( $songFileName, $songFilePath ) = fileparse( abspathL ( $songFile ) );
+	my ( $songFileName, $songFileDir ) = fileparse( abspathL ( $songFile ) );
 	my $tmpSongFileName = $songFileName;
 	if ( $tmpSongFileName =~ s#(.)\.(\w\w\w\w?)$#$1_tmp\.$2#i ) {
 		#verifying file is not left open by other process
-		renameL ( $songFilePath . $songFileName, $songFilePath . $tmpSongFileName ) or badExit( $subName, "Not able to rename song file: '" . $songFilePath . $songFileName . "' to temp file: '" . $songFilePath . $tmpSongFileName . "'" );
+		renameL ( $songFileDir . $songFileName, $songFileDir . $tmpSongFileName ) or badExit( $subName, "Not able to rename song file: '" . $songFileDir . $songFileName . "' to temp file: '" . $songFileDir . $tmpSongFileName . "'" );
 	}
 
 	#create array of metadata tag args to add in ffmpeg (will splice into command args array)
@@ -2302,7 +2298,7 @@ sub writeTags
 		}
 		#replace any values that contain newlines
 		$tagsRef->{$key} =~ s#\r?\n#,#g;
-		if ( ! $tagsRef->{$key} ) {
+		if ( ! defined $tagsRef->{$key} ) {
 			#fix any keys that have whitespace in the name
 			if ( $key =~ m#\s# ) {
 				$metaKey = "\"$key\"";
@@ -2322,7 +2318,7 @@ sub writeTags
 		#ffmpeg executable
 		'"' . $ffmpegCmd . '"',
 		#input file is temporary song file
-		'-i "' . $songFilePath . $tmpSongFileName . '"',
+		'-i "' . $songFileDir . $tmpSongFileName . '"',
 		#wipe existing metadata - fix some files not accepting changes if not cleared first
 		'-map_metadata -1',
 		#copy audio, no need for encoding/decoding
@@ -2342,7 +2338,7 @@ sub writeTags
 		#no video
 		'-vn',
 		#output song file
-		'"' . $songFilePath . $songFileName . '"'
+		'"' . $songFileDir . $songFileName . '"'
 	);
 	#splice in array of '-metadata' switches into @ffmpeg args
 	splice( @ffmpegArgs, 11, 0, @newMeta );
@@ -2360,11 +2356,11 @@ sub writeTags
 	$stdErr = decode( $Config{enc_to_system} || 'UTF-8', $rawStdErr );
 	#clean error header from 'ffmpeg'
 	$stdErr =~ s#^ffmpeg version.+libswresample[\d\.\s\/]+$##is;
-	if ( $? || $stdErr || ( ! testL ( 's', $songFilePath . $songFileName ) ) ) {
+	if ( $? || $stdErr || ( ! testL ( 's', $songFileDir . $songFileName ) ) ) {
 		badExit( $subName, "Not able to run 'ffmpeg' for song: '" . $songFileName . "', returned:\n" . $stdErr );
 	}
 	#removing temp song file & 'ffmpeg' batch file
-	deleteFile( $songFilePath . $tmpSongFileName, $subName, 'song' );
+	deleteFile( $songFileDir . $tmpSongFileName, $subName, 'song' );
 	deleteFile( $ffmpegBat, $subName, "'ffmpeg' batch" );
 }
 
@@ -2510,7 +2506,7 @@ sub tkEnd
 		-activebackground => TK_COLOR_LGREEN
 	);
 	$M->{'make_XML_playlist'}->configure(
-		-text							=> 'Create XML',
+		-text							=> 'Make XML Playlist',
 		-font							=> TK_FNT_B,
 		-state						=> 'normal',
 		-bg								=> TK_COLOR_BG,
