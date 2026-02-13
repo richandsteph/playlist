@@ -1,0 +1,38 @@
+#**********************************************************************************************************
+#
+#	File: .ExifTool_config
+#	Desc: Configuration file for ExifTool::Image - *must be saved in %USERPROFILE% folder (home):
+#       1) 'Options' - set character encoding to Unicode, set to ignore minor warnings, request all tags
+#       2) 'QuickTime' - set to use keys for QuickTime files (.m4a audio)
+#       3) 'print' - print to console successful load message
+#       4) '1' - end configuration scriipt with success
+#
+# Usage in header of Perl script:
+#            BEGIN { $Image::ExifTool::configFile = '%USERPROFILE%\.ExifTool_config' }
+#            use Image::ExifTool qw( :Public );
+#
+#	Author: Richard Davis
+#         rich@richandsteph.com
+#
+#**********************************************************************************************************
+#
+# Version 1.0 - 13 Feb 2026	 RAD initial creation
+#
+#**********************************************************************************************************
+
+%Image::ExifTool::UserDefined::Options = (
+		Charset => 'UTF-8',
+    CharsetEXIF => 'UTF-8',
+    CharsetFileName => 'UTF-8',
+    CharsetID3 => 'UTF-8',
+    CharsetIPTC => 'UTF-8',
+    IgnoreMinorWarnings => 1,
+    RequestAll => 3
+);
+
+use Image::ExifTool::QuickTime;
+$Image::ExifTool::QuickTime::Keys{PREFERRED} = 3;
+
+print "ExifTool Configuration Loaded...\n";
+
+1;
