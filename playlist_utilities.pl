@@ -103,6 +103,9 @@
 #                                config file / changed check for no tag values to use 'defined' in tag 
 #                                tests in make_XML_playlist() & update_ID3_tags() / refactored some 
 #                                variable names for clarity
+#        1.10 - 13 Feb 2026  RAD added 'avgbitrate' to @listOfTagArrays for 'bitrate' in .m4a song files / 
+#                                replaced use of int() with sprintf() - need rounding / removed defined() 
+#                                in tests where checking for non-empty value
 #
 #
 #   TO-DO:
@@ -110,7 +113,7 @@
 #
 #**********************************************************************************************************
 
-my $Version = '1.9';
+my $Version = '1.10';
 
 use strict;
 use warnings;
@@ -190,7 +193,7 @@ my @listOfTagArrays = (
 	[ 'albumsortorder', 'albumsort' ],
 	[ 'artist', 'originalartist', 'ensemble', 'band', 'author', 'artists' ],
 	[ 'artistsortorder', 'artistsort' ],
-	[ 'bitrate', 'bit_rate', 'audiobitrate' ],
+	[ 'bitrate', 'bit_rate', 'audiobitrate', 'avgbitrate' ],
 	[ 'comment', 'comment-xxx' ],
 	[ 'composer' ],
 	[ 'discnumber', 'disc', 'partofset', 'disk' ],
@@ -199,8 +202,8 @@ my @listOfTagArrays = (
 	[ 'publisher' ],
 	[ 'title' ],
 	[ 'titlesortorder', 'titlesort', 'sort_with' ],
-	[ 'track', 'tracknumber', 'part_number', 'part', 'trackid' ],
-	[ 'year', 'date', 'originaldate', 'originalreleaseyear', 'release_date', 'datetimeoriginal', 'recordingdates' ]
+	[ 'track', 'part', 'tracknumber', 'part_number', 'trackid' ],
+	[ 'year', 'date', 'createdate', 'originaldate', 'originalreleaseyear', 'release_date', 'datetimeoriginal', 'recordingdates' ]
 );
 
 #array list of necessary ID3 tags for XML output, in order of desired XML output
@@ -322,9 +325,12 @@ sub progName
 	my $prog;
 
 	#running under PerlApp, so get name of program
-	if ( defined $PerlApp::VERSION ) { $prog = PerlApp::exe(); }
+	if ( defined $PerlApp::VERSION ) {
+		$prog = PerlApp::exe();
+	} else {
 	# Not running PerlAppified, so file should already exist
-	else { $prog = fileparse( $0 ); }
+		$prog = fileparse( $0 );
+	}
 
 	$prog =~ s#\..*$##;
 	return( $prog );
@@ -995,7 +1001,7 @@ sub make_XML_playlist
 		exifTools( $num, \%tags, $songFile );
 
 		#check if crucial tags have been set, try to determine from filename & path
-		if ( ( ! defined $tags{title} ) || ( ! defined $tags{artist} ) || ( ! defined $tags{track} ) || ( ! defined $tags{album} ) || ( ! defined $tags{length} ) ) {
+		if ( ( ! $tags{title} ) || ( ! $tags{artist} ) || ( ! $tags{track} ) || ( ! $tags{album} ) || ( ! $tags{length} ) || ( ! $tags{albumartist} ) || ( ! $tags{discnumber} ) ) {
 			extractTags( $num, \%tags, $songFile );
 		}
 
@@ -1608,7 +1614,7 @@ sub update_ID3_tags
 		exifTools( $num, \%tags, $pathContent );
 	
 		#check if crucial tags have been set, try to determine from filename & path
-		if ( ( ! defined $tags{title} ) || ( ! defined $tags{artist} ) || ( ! defined $tags{track} ) || ( ! defined $tags{album} ) || ( ! defined $tags{length} ) ) {
+		if ( ( ! $tags{title} ) || ( ! $tags{artist} ) || ( ! $tags{track} ) || ( ! $tags{album} ) || ( ! $tags{length} ) || ( ! $tags{albumartist} ) || ( ! $tags{discnumber} ) ) {
 			extractTags( $num, \%tags, $pathContent );
 		}
 	
@@ -1617,11 +1623,11 @@ sub update_ID3_tags
 	
 		#check crucial tags in @listOfXmlTags for values
 		toLog( $subName, "   - Scanning tags to see if any desired tags are not defined\n" );
-		foreach my $tag ( @listOfXmlTags ) {
-			if ( ! $tags{$tag} ) {
+		foreach my $tagName ( @listOfXmlTags ) {
+			if ( ! $tags{$tagName} ) {
 				#remove empty hash elements, so they don't get removed by 'ffmpeg'
-				toLog( $subName, "     - '" . $tag . "' tag is not declared, removing key from hash\n" );
-				delete $tags{$tag};
+				toLog( $subName, "     - '" . $tagName . "' tag is not declared, removing key from hash\n" );
+				delete $tags{$tagName};
 			}
 		}
 		
@@ -1715,14 +1721,14 @@ sub mkvTools
 		}
 		for ( my $tagsCol = $#{$tagsRowRef}; $tagsCol >= 0; $tagsCol-- ) {
 			my $tagName = $listOfTagArrays[$tagsRow][$tagsCol];
-			$tagsRef->{$primaryTagName} = $tagsRef->{$tagName} if ( defined $tagsRef->{$tagName} );
+			$tagsRef->{$primaryTagName} = $tagsRef->{$tagName} if ( $tagsRef->{$tagName} );
 		}
 		#reset base value to starting value, before setting all others
 		$tagsRef->{$primaryTagName} = $primaryTagValue if ( $primaryTagValue );
 		for my $tagsCol ( 0 .. $#{$tagsRowRef} ) {
 			my $tagName = $listOfTagArrays[$tagsRow][$tagsCol];
 			#only set when original had a value
-			$tagsRef->{$tagName} = $tagsRef->{$primaryTagName} if ( $tagsRef->{$tagName} );
+			$tagsRef->{$tagName} = $tagsRef->{$primaryTagName} if ( exists $tagsRef->{$tagName} );
 		}
 	}
 
@@ -1730,7 +1736,7 @@ sub mkvTools
 	deleteFile( $songFileXml, $subName, 'XML data for song' );
 
 	#determine 'title', if not specified previously
-	if ( ! defined $tagsRef->{title} ) {
+	if ( ! $tagsRef->{title} ) {
 		#set ffprobe command for finding 'title' on song files that don't have the value
 		toLog( $subName, "   - Preparing command for 'ffprobe' to determine 'title'\n" );
 		my @ffprobeArgs = (
@@ -1768,7 +1774,7 @@ sub mkvTools
 	}
 
 	#determine 'bitrate', if not specified previously
-	if ( ! defined $tagsRef->{bitrate} ) {
+	if ( ! $tagsRef->{bitrate} ) {
 		#set ffprobe command for finding 'bitrate' on song files that don't have the value
 		toLog( $subName, "   - Preparing command for 'ffprobe' to determine 'bitrate'\n" );
 		my @ffprobeArgs = (
@@ -1798,7 +1804,7 @@ sub mkvTools
 			$bitrate = $1;
 			if ( $bitrate =~ s#^(\d{5}\d*).*$#$1# ) {
 				$bitrate = $bitrate / 1000;
-				$bitrate = int( $bitrate );
+				$bitrate = sprintf "%d", $bitrate;
 			} else {
 				#strip any extraneous characters from digits otherwise
 				$bitrate =~ s#^(\d+).*$#$1#;
@@ -1826,8 +1832,8 @@ sub exifTools
 
 	my ( $package, $file, $line, $subName ) = caller( 1 );
 	$subName =~ s#main::##;
-	toLog( $subName, "   - Preparing for 'ExifTool' to export metadata tags from song file\n" );
-	updStatus( "Running 'exifTool' to export metadata" );
+	toLog( $subName, "   - Retrieving metadata from song file with 'ExifTool'\n" );
+	updStatus( "Using 'exifTool' to read metadata" );
 
 	#use ExifTool Perl modules
 	my ( @exifTagList, $exifHashRef );
@@ -1857,14 +1863,14 @@ sub exifTools
 		}
 		for ( my $tagsCol = $#{$tagsRowRef}; $tagsCol >= 0; $tagsCol-- ) {
 			my $tagName = $listOfTagArrays[$tagsRow][$tagsCol];
-			$tagsRef->{$primaryTagName} = $tagsRef->{$tagName} if ( defined $tagsRef->{$tagName} );
+			$tagsRef->{$primaryTagName} = $tagsRef->{$tagName} if ( $tagsRef->{$tagName} );
 		}
 		#reset base value to starting value, before setting all others
 		$tagsRef->{$primaryTagName} = $primaryTagValue if ( $primaryTagValue );
 		for my $tagsCol ( 0 .. $#{$tagsRowRef} ) {
 			my $tagName = $listOfTagArrays[$tagsRow][$tagsCol];
-			#only set when original had a value
-			$tagsRef->{$tagName} = $tagsRef->{$primaryTagName} if ( $tagsRef->{$tagName} );
+			#only set when original is instantiated
+			$tagsRef->{$tagName} = $tagsRef->{$primaryTagName} if ( exists $tagsRef->{$tagName} );
 		}
 	}
 }
@@ -1893,14 +1899,14 @@ sub cleanTags
 		my $priorityTagValue = $tagsRef->{$priorityTagName};
 		for ( my $tagsCol = $#{$innerArrayRef}; $tagsCol >= 0; $tagsCol-- ) {
 			my $tagName = $listOfTagArrays[$tagsRow][$tagsCol];
-			$tagsRef->{$priorityTagName} = $tagsRef->{$tagName} if ( defined $tagsRef->{$tagName} );
+			$tagsRef->{$priorityTagName} = $tagsRef->{$tagName} if ( $tagsRef->{$tagName} );
 		}
 		#reset base value to starting value, before setting all others
 		$tagsRef->{$priorityTagName} = $priorityTagValue if ( $priorityTagValue );
 		for my $tagsCol ( 0 .. $#{$innerArrayRef} ) {
 			my $tagName = $listOfTagArrays[$tagsRow][$tagsCol];
-			#only set when original had a value
-			$tagsRef->{$tagName} = $tagsRef->{$priorityTagName} if ( $tagsRef->{$tagName} );
+			#only set when original is instantiated
+			$tagsRef->{$tagName} = $tagsRef->{$priorityTagName} if ( exists $tagsRef->{$tagName} );
 		}
 	}
 
@@ -1913,11 +1919,11 @@ sub cleanTags
 			#correct 'AC/DC'
 			$tagsRef->{$key} =~ s#^AC[_ ]DC$#AC\/DC#i;
 			#set 'albumartist' if not specified
-			if ( ! defined $tagsRef->{albumartist} ) {
+			if ( ! $tagsRef->{albumartist} ) {
 				$tagsRef->{albumartist} = $tagsRef->{$key};
 			}
 			#set 'artistsortorder' if not specified
-			if ( ! defined $tagsRef->{artistsortorder} ) {
+			if ( ! $tagsRef->{artistsortorder} ) {
 				$tagsRef->{artistsortorder} = $tagsRef->{$key};
 				#remove extra artist info
 				$tagsRef->{artistsortorder} =~ s#^([^;]+)(?<!&amp);.*$#$1#;
@@ -1925,11 +1931,11 @@ sub cleanTags
 				$tagsRef->{artistsortorder} =~ s#^(the|a|an)\s+(.+)#$2#i;
 			}
 			#set 'band' if not specified, when it exists already
-			if ( ( exists $tagsRef->{band} ) && ( ! defined $tagsRef->{band} ) ) {
+			if ( ( exists $tagsRef->{band} ) && ( ! $tagsRef->{band} ) ) {
 				$tagsRef->{band} = $tagsRef->{$key};
 			}
 			#set 'ensemble' if not specified, when it exists already
-			if ( ( exists $tagsRef->{ensemble} ) && ( ! defined $tagsRef->{ensemble} ) ) {
+			if ( ( exists $tagsRef->{ensemble} ) && ( ! $tagsRef->{ensemble} ) ) {
 				$tagsRef->{ensemble} = $tagsRef->{$key};
 			}
 			#rename certain tags to .m4a or .mkv specific tags
@@ -1937,12 +1943,12 @@ sub cleanTags
 				$tagsRef->{author} = $tagsRef->{$key} unless ( $tagsRef->{author} );
 				$tagsRef->{album_artist} = $tagsRef->{albumartist} unless ( $tagsRef->{album_artist} );
 			} elsif ( $songFile =~ m#\.mkv$#i ) {
-				$tagsRef->{'album_artist'} = $tagsRef->{albumartist} unless ( $tagsRef->{'album_artist'} );
+				$tagsRef->{album_artist} = $tagsRef->{albumartist} unless ( $tagsRef->{album_artist} );
 				$tagsRef->{artists} = $tagsRef->{$key} unless ( $tagsRef->{artists} );
 			}
 		} elsif ( $key =~ m#^title$# ) {
 			#set 'titlesortorder' if not specified
-			if ( ! defined $tagsRef->{titlesortorder} ) {
+			if ( ! $tagsRef->{titlesortorder} ) {
 				$tagsRef->{titlesortorder} = $tagsRef->{$key};
 				#strip starting articles
 				$tagsRef->{titlesortorder} =~ s#^(the|a|an)\s+(.+)#$2#i;
@@ -1953,51 +1959,90 @@ sub cleanTags
 			#remove extra artist info
 			$tagsRef->{$key} =~ s#^([^;]+)(?<!&amp);.*$#$1#;
 			#set 'albumartistsortorder' if not specified
-			if ( ! defined $tagsRef->{albumartistsortorder} ) {
+			if ( ! $tagsRef->{albumartistsortorder} ) {
 				$tagsRef->{albumartistsortorder} = $tagsRef->{$key};
 				#strip starting articles
 				$tagsRef->{albumartistsortorder} =~ s#^(the|a|an)\s+(.+)#$2#i;
 			}
 		} elsif ( $key =~ m#^album$# ) {
 			#set 'albumsortorder' if not specified
-			if ( ! defined $tagsRef->{albumsortorder} ) {
+			if ( ! $tagsRef->{albumsortorder} ) {
 				$tagsRef->{albumsortorder} = $tagsRef->{$key};
 				#strip starting articles
 				$tagsRef->{albumsortorder} =~ s#^(the|a|an)\s+(.+)#$2#i;
 			}
 		} elsif ( $key =~ m#^track$#i ) {
 			#remove total number
-			if ( $tagsRef->{track} =~ m#(\d+)\/\d+# ) {
-				$tagsRef->{track} = $1;
+			if ( $tagsRef->{$key} =~ m#(\d+)\/\d+# ) {
+				$tagsRef->{$key} = $1;
 			}
 			if ( $songFile =~ m#\.(ogg|flac)$#i ) {
 				$tagsRef->{tracknumber} = $tagsRef->{$key} unless ( $tagsRef->{tracknumber} );
 			} elsif ( $songFile =~ m#\.mkv$#i ) {
-				$tagsRef->{'part_number'} = $tagsRef->{$key} unless ( $tagsRef->{'part_number'} );
+				$tagsRef->{part_number} = $tagsRef->{$key} unless ( $tagsRef->{part_number} );
+			}
+		} elsif ( ( $key =~ m#^part$#i ) && ( $songFile =~ m#\.m4a$# ) ) {
+			#remove total number
+			if ( $tagsRef->{$key} =~ m#(\d+)\/\d+# ) {
+				$tagsRef->{$key} = $1;
+			}
+		} elsif ( ( $key =~ m#^disk$#i ) && ( $songFile =~ m#\.m4a$# ) ) {
+			if ( ! $tagsRef->{discnumber} ) {
+				$tagsRef->{discnumber} = $tagsRef->{$key};
+			}
+		} elsif ( ( $key =~ m#^createdate$#i ) && ( $songFile =~ m#\.m4a$# ) ) {
+			#remove if set to 0's
+			if ( $tagsRef->{$key} =~ m#^0000:# ) {
+				delete $tagsRef->{$key};
+			} elsif ( $tagsRef->{$key} =~ m#^0000$# ) {
+				#if copied from year, then reset for writing metadata in writeTags()
+				$tagsRef->{$key} .= ':01:01 00:00:00';
 			}
 		} elsif ( $key =~ m#^year$#i ) {
-			#remove duplicates, etc. from 'year' value
+			#remove extraneous from 'year' value
 			$tagsRef->{$key} =~ s#^(\d\d\d\d).*$#$1#;
+			#remove tag if year is '0000'
+			delete $tagsRef->{$key} if ( $tagsRef->{$key} =~ m#^0000$# );
+			#remove 'createdate' tag for .m4a song files, if set to 0's
 			if ( $tagsRef->{$key} =~ m#^$# ) {
 				if ( ( $tagsRef->{date} ) && ( $tagsRef->{date} !~ m#^$# ) ) {
-					#remove duplicates, etc.
+					#remove extraneous
 					$tagsRef->{date} =~ s#^(\d\d\d\d).*$#$1#;
 					$tagsRef->{$key} = $tagsRef->{date};
 				}
 			}
 		} elsif ( $key =~ m#^bitrate$#i ) {
-			#'bitrate' needs some format checks
-			#match at least 6 digits (for 1,000's), but also capture any trailing digits but leaving the rest off)
+			#match at least 5 digits (for 10,000's), but also capture any trailing digits & leaving rest off)
 			if ( $tagsRef->{$key} =~ s#^(\d{5}\d*).*$#$1# ) {
 				$tagsRef->{$key} = $tagsRef->{$key} / 1000;
-				$tagsRef->{$key} = int( $tagsRef->{$key} );
+				$tagsRef->{$key} = sprintf "%d", $tagsRef->{$key};
+			} elsif ( $tagsRef->{$key} =~ m#^([\d\.]+)\s+Mbps$#i ) {
+				#bitrate in Mbps
+				$tagsRef->{$key} = $1;
+				$tagsRef->{$key} = $tagsRef->{$key} * 1000;
+				$tagsRef->{$key} = sprintf "%d", $tagsRef->{$key};
 			} else {
 				#strip any extraneous characters from digits otherwise
-				$tagsRef->{$key} =~ s#^(\d+).*$#$1#;
+				$tagsRef->{$key} =~ s#^([\d\.]+).*$#$1#;
+				$tagsRef->{$key} = sprintf "%d", $tagsRef->{$key};
+			}
+		} elsif ( ( $key =~ m#^avgbitrate$#i ) && ( $songFile =~ m#\.m4a$# ) ) {
+			if ( $tagsRef->{$key} =~ m#^([\d\.]+)\s+Mbps$#i ) {
+				#bitrate in Mbps
+				$tagsRef->{$key} = $1;
+				$tagsRef->{$key} = $tagsRef->{$key} * 1000;
+				$tagsRef->{$key} = sprintf "%d", $tagsRef->{$key};
+			} else {
+				#strip any extraneous characters from digits otherwise
+				$tagsRef->{$key} =~ s#^([\d\.]+).*$#$1#;
+				$tagsRef->{$key} = sprintf "%d", $tagsRef->{$key};
 			}
 		} elsif ( $key =~ m#^comment$#i ) {
 			#if 'comment' has previously used diagnostic text, remove it
-			if ( ( $tagsRef->{$key} =~ m#created from filename#i ) || ( $tagsRef->{$key} =~ m#updated with default#i ) || ( $tagsRef->{$key} =~ m#^vendor$#i ) || ( $tagsRef->{$key} =~ m#^\s+$#i ) ) {
+			if ( ( $tagsRef->{$key} =~ m#created from filename#i ) || ( $tagsRef->{$key} =~ m#updated with default#i ) || ( $tagsRef->{$key} =~ m#^vendor$#i ) ) {
+				$tagsRef->{$key} = '';
+			} elsif ( ( $tagsRef->{$key} =~ m#^\s*0000# ) || ( $tagsRef->{$key} =~ m#^\s+$#i ) ) {
+				#long range of numbers or space
 				$tagsRef->{$key} = '';
 			}
 		} elsif ( $key =~ m#^genre$#i ) {
@@ -2006,12 +2051,12 @@ sub cleanTags
 				$tagsRef->{$key} = '';
 			}
 		} elsif ( $key =~ m#^length$#i ) {
-			if ( ( ! defined $tagsRef->{$key} ) && ( defined $tagsRef->{duration} ) ) {
+			if ( ( ! $tagsRef->{$key} ) && ( $tagsRef->{duration} ) ) {
 				$tagsRef->{$key} = $tagsRef->{duration};
 			}
-			if ( defined $tagsRef->{$key} ) {
+			if ( $tagsRef->{$key} ) {
 				unless ( $tagsRef->{$key} =~ m#^\d+$# ) {
-					if ( defined $tagsRef->{duration} ) {
+					if ( $tagsRef->{duration} ) {
 						$tagsRef->{$key} = $tagsRef->{duration};
 						#remove 'duration'
 						delete $tagsRef->{duration};
@@ -2027,10 +2072,10 @@ sub cleanTags
 				my ( $minutes, $seconds );
 				if ( $tagsRef->{$key} =~ m#^(\d+:\d+:\d+\.?\d*)# ) {
 					$seconds = convertLength( $1 );
-					$tagsRef->{$key} = int( $seconds );
+					$tagsRef->{$key} = sprintf "%d", $seconds;
 				} elsif ( $tagsRef->{$key} =~ m#^(\d?\d{5})\.?\d*# ) {
 					#possible length in milliseconds
-					$tagsRef->{$key} = int( $1 / 1000 );
+					$tagsRef->{$key} = sprintf "%d", $1 / 1000;
 				} else {
 					$seconds = $tagsRef->{$key};
 				}
@@ -2086,25 +2131,25 @@ sub extractTags
 		#add escape '\' to square brackets for match expression
 		my $albumMatch = $album;
 		$albumMatch =~ s#([\(\)\[\]\*\+])#\$1#g;
-		$tagsRef->{artist} = $artist if ( ! defined $tagsRef->{artist} );
+		$tagsRef->{artist} = $artist if ( ! $tagsRef->{artist} );
 		#determine if directory is actually a compilation with 'Disc' folders
 		if ( ( $artist =~ m#^$albumMatch$#i ) || ( $album =~ m#^dis[ck]\s*\d+$#i ) ) {
-			$tagsRef->{album} = $artist if ( ! defined $tagsRef->{album} );
+			$tagsRef->{album} = $artist if ( ! $tagsRef->{album} );
 		} else {
-			$tagsRef->{album} = $album if ( ! defined $tagsRef->{album} );
+			$tagsRef->{album} = $album if ( ! $tagsRef->{album} );
 		}
 		#correct 'AC/DC'
 		$tagsRef->{artist} =~ s#^AC[_ ]DC$#AC\/DC#i;
-		if ( ! defined $tagsRef->{albumartist} ) {
+		if ( ! $tagsRef->{albumartist} ) {
 			$tagsRef->{albumartist} = $tagsRef->{artist};
 			#remove extra artist info
 			$tagsRef->{albumartist} =~ s#^([^;]+)(?<!&amp);.*$#$1#;
 		}
 	} elsif ( $songFileDir =~ m#\\Music\\([^\\]+)\\$#i ) {
 		#song file is inside 'Album\song file' format
-		$tagsRef->{artist} = $1 if ( ! defined $tagsRef->{artist} );
-		$tagsRef->{album} = $1 if ( ! defined $tagsRef->{album} );
-		$tagsRef->{albumartist} = $1 if ( ! defined $tagsRef->{albumartist} );
+		$tagsRef->{artist} = $1 if ( ! $tagsRef->{artist} );
+		$tagsRef->{album} = $1 if ( ! $tagsRef->{album} );
+		$tagsRef->{albumartist} = $1 if ( ! $tagsRef->{albumartist} );
 		#correct 'AC/DC'
 		$tagsRef->{artist} =~ s#^AC[_ ]DC$#AC\/DC#i;
 		#remove extra artist info
@@ -2114,12 +2159,12 @@ sub extractTags
 	}
 
 	if ( $songFileName =~ m#((\d)-)?(\d*)\s*-?\s*(.+)\.(aac|alac|flac|m4a|mka|mkv|mp3|ogg|wma)$#i ) {
-		$tagsRef->{title} = $4 if ( ! defined $tagsRef->{title} );
-		$tagsRef->{track} = $3 if ( ! defined $tagsRef->{track} );
-		$tagsRef->{discnumber} = $2 if ( ( $2 ) && ( ! defined $tagsRef->{discnumber} ) );
+		$tagsRef->{title} = $4 if ( ! $tagsRef->{title} );
+		$tagsRef->{track} = $3 if ( ! $tagsRef->{track} );
+		$tagsRef->{discnumber} = $2 if ( ( $2 ) && ( ! $tagsRef->{discnumber} ) );
 	}
 
-	if ( ( ! defined $tagsRef->{length} ) && ( ! defined $tagsRef->{duration} ) ) {
+	if ( ( ! $tagsRef->{length} ) && ( ! $tagsRef->{duration} ) ) {
 		#set ffprobe command for finding 'length' on song files that don't have the value
 		toLog( $subName, "   - Preparing command for 'ffprobe' to determine 'length'\n" );
 		my @ffprobeArgs = (
@@ -2149,19 +2194,19 @@ sub extractTags
 			my $remSecs = $length - ( $minutes * 60 );
 			$remSecs = sprintf "%.02d", $remSecs;
 			$tagsRef->{minutes} = $minutes . ':' . $remSecs;
-			$tagsRef->{length} = int( $length );
+			$tagsRef->{length} = sprintf "%d", $length;
 		}
 	
 		#clean up temporary files
 		deleteFile( $ffprobeBat, $subName, "'ffprobe-length' batch" );
 
-		if ( ( ! defined $tagsRef->{title} ) || ( ! defined $tagsRef->{artist} ) || ( ! defined $tagsRef->{track} ) || ( ! defined $tagsRef->{album} ) || ( ! defined $tagsRef->{length} ) ) {
+		if ( ( ! $tagsRef->{title} ) || ( ! $tagsRef->{artist} ) || ( ! $tagsRef->{track} ) || ( ! $tagsRef->{album} ) || ( ! $tagsRef->{length} ) ) {
 			warning( $subName, 'Could not determine <title>, <artist>, and/or possibly other necessary tags' );
 		}
 	}
 
 	#set 'discnumber' to default value, if not present
-	if ( ! defined $tagsRef->{discnumber} ) {
+	if ( ! $tagsRef->{discnumber} ) {
 		$tagsRef->{discnumber} = 1;
 	}
 }
@@ -2265,40 +2310,32 @@ sub writeTags
 		$metaKey = $key;
 		#use 'part' & 'sort_with' when .mkv song file type
 		if ( $songFileName =~ m#\.mkv$#i ) {
-			if ( $key =~ m#^track$#i ) {
-				$key = 'part';
-				$metaKey = 'part';
-				$tagsRef->{$key} = $tagsRef->{track};
-				delete $tagsRef->{track};
-			} elsif ( $key =~ m#^titlesortorder$#i ) {
-				$key = 'sort_with';
-				$metaKey = 'sort_with';
-				$tagsRef->{$key} = $tagsRef->{titlesortorder};
-				delete $tagsRef->{titlesortorder};
-			} elsif ( $key =~ m#^titlesort$#i ) {
-				$key = 'sort_with';
-				$metaKey = 'sort_with';
-				$tagsRef->{$key} = $tagsRef->{titlesort};
-				delete $tagsRef->{titlesort};
+			if ( ( $key =~ m#^track$#i ) && ( $tagsRef->{part} ) ) {
+				$tagsRef->{$key} = $tagsRef->{part};
+			} elsif ( ( $key =~ m#^titlesortorder$#i ) && ( $tagsRef->{sort_with} ) ) {
+				$tagsRef->{$key} = $tagsRef->{sort_with};
+			} elsif ( ( $key =~ m#^titlesort$#i ) && ( $tagsRef->{sort_with} ) ) {
+				#only set if preferred value not set
+				if ( ! $tagsRef->{titlesortorder} ) {
+					$tagsRef->{$key} = $tagsRef->{sort_with};
+				}
 			}
 		}
+		#set 'disk', 'album_artist', & 'createdate' when .m4a song file type
 		if ( $songFileName =~ m#\.m4a$#i ) {
-			#key for 'year' may be: '©day'
-			if ( $key =~ m#^discnumber$#i ) {
-				$key = 'disk';
-				$metaKey = 'disk';
-				$tagsRef->{$key} = $tagsRef->{discnumber};
-				delete $tagsRef->{discnumber};
-			} elsif ( $key =~ m#^albumartist$#i ) {
-				$key = 'album_artist';
-				$metaKey = 'album_artist';
-				$tagsRef->{$key} = $tagsRef->{albumartist};
-				delete $tagsRef->{albumartist};
+			#key for 'year' may also be: '©day'
+			if ( ( $key =~ m#^discnumber$#i ) && ( ! $tagsRef->{$key} ) && ( $tagsRef->{disk} ) ) {
+				$tagsRef->{$key} = $tagsRef->{disk};
+			} elsif ( ( $key =~ m#^albumartist$#i ) && ( ! $tagsRef->{$key} ) && ( $tagsRef->{album_artist} ) ) {
+				$tagsRef->{$key} = $tagsRef->{album_artist};
+			} elsif ( ( $key =~ m#^createdate$#i ) && ( $tagsRef->{$key} =~ m#^\d\d\d\d$# ) ) {
+				#set year value with special format required
+				$tagsRef->{$key} .= ':01:01 00:00:00';
 			}
 		}
 		#replace any values that contain newlines
 		$tagsRef->{$key} =~ s#\r?\n#,#g;
-		if ( ! defined $tagsRef->{$key} ) {
+		if ( ! $tagsRef->{$key} ) {
 			#fix any keys that have whitespace in the name
 			if ( $key =~ m#\s# ) {
 				$metaKey = "\"$key\"";
