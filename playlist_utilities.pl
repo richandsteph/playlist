@@ -105,7 +105,9 @@
 #                                variable names for clarity
 #        1.10 - 13 Feb 2026  RAD added 'avgbitrate' to @listOfTagArrays for 'bitrate' in .m4a song files / 
 #                                replaced use of int() with sprintf() - need rounding / removed defined() 
-#                                in tests where checking for non-empty value
+#                                in tests where checking for non-empty value / added some value tests when 
+#                                checking for existance of tag value / added rules for checking 'part', 
+#                                'disk', & 'createdate'
 #
 #
 #   TO-DO:
@@ -1258,7 +1260,7 @@ sub make_m3u
 		#echo status to console
 		my ( $xmlName ) = fileparse( abspathL ( $xmlFile ) );
 		binmode( STDOUT, ":encoding(UTF-8)" );
-		print "   Finished Making .m3u Playlist '" . $m3uFileName . "'\n";
+		print "   Finished Making .m3u Playlist '" . $m3uFile . "'\n";
 	}
 	
 	#process end
@@ -2563,7 +2565,7 @@ sub tkExit
 	saveLastVal();
 
 	#close log file
-	endLog();
+	endLog( undef );
 
 	$M->{'window'}->destroy;
 	exit( 0 );
