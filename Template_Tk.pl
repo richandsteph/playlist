@@ -15,6 +15,7 @@
 #**********************************************************************************************************
 #
 # Version 1.0  -  31 Jan 2026  RAD  initial creation
+#         2.0  -  15 Feb 2026  RAD  updated to use current standards in 'playlist_utilities.pl'
 #
 #
 #   TO-DO:
@@ -22,7 +23,7 @@
 #
 #**********************************************************************************************************
 
-my $Version = "1.0";
+my $Version = "2.0";
 
 use strict;
 use warnings;
@@ -30,17 +31,11 @@ use utf8::all;
 use feature 'unicode_strings';
 use open ':std', IO => ':raw :encoding(UTF-8)';
 
+use Config;
 use Data::Dumper qw( Dumper );
 use File::Basename qw( fileparse );
-#uncomment line below to specify config file for ExifTool
-#BEGIN { $Image::ExifTool::configFile = 'C:\Users\rich\.ExifTool_config' }
-use Image::ExifTool qw( :Public );
-use IPC::Run3;
-use JSON;
 use Tk;
 use Tk::DialogBox;
-use XML::LibXML;
-use XML::Writer;
 use Win32;
 use Win32::LongPath qw( abspathL chdirL getcwdL openL renameL testL unlinkL );
 
@@ -70,22 +65,24 @@ my $warnCnt = 0;
 my $Sep = "-" x 110;
 my $SEP = "=" x 110;
 my $proc = 'Waiting on command...';
-my $progNm = progNm();
-my ( $dirName, $fileName, $filePath, $log, $stat );
-#log file handles for function log vs. main log
+my $progName = progNm();
+#instantiate warning hash
+my %warn;
+my ( $dirPath, $fileName, $fileFQN, $log, $stat );
+#log file handles for function log vs. global log
 my ( $funcLogFH, $logFH );
 my $FS = '\\';
 
 #process variables
 if ( $ARGV[0] ) {
-	$filePath = $ARGV[0];
+	$fileFQN = $ARGV[0];
 	#directory separator default for Windows command line
-	$filePath =~ s#[\/\\]#$FS#g;
-	( $fileName, $dirName ) = fileparse( abspathL ( $filePath ) );
-	if ( ! testL ( 'd', $dirName ) ) {
-		$dirName = getcwdL();
+	$fileFQN =~ s#[\/\\]#$FS#g;
+	( $fileName, $dirPath ) = fileparse( abspathL ( $fileFQN ) );
+	if ( ! testL ( 'd', $dirPath ) ) {
+		$dirPath = getcwdL();
 	}
-	$filePath = "$dirName$fileName";
+	$fileFQN = "$dirPath$fileName";
 }
 
 #create initial window and pass to tk caller, start overall logging
@@ -103,12 +100,12 @@ sub getFiles
 
 	updStatus( undef, 'Building list of files...' );
 
-	opendir DIR, $dirName or badExit( undef, "Could not open directory\n looking in <$dirName>" );
+	opendir DIR, $dirPath or badExit( undef, "Could not open directory\n looking in <$dirPath>" );
 		@fileFolder = readdir DIR;
 	closedir DIR;
 	@files = grep m/\.xml$/i, @fileFolder;
 	unless ( scalar( @files ) ) {
-		badExit( undef, "No files were found in directory\n looking in <$dirName>" );
+		badExit( undef, "No files were found in directory\n looking in <$dirPath>" );
 	}
 	
 	#change to working directory
@@ -143,7 +140,7 @@ sub mainProcess
 		my $command;
 
 		toLog( $funcName, "\n\tRunning $command\n\n" );
-		updStatus( "Starting $progNm process", undef );
+		updStatus( "Starting $progName process", undef );
 
 		my $status = 0;
 
@@ -170,94 +167,117 @@ sub startLog
   my ( $funcName ) = @_;
 
 	my $now = dateTime();
-	my $timeSt = $now->{'date'} . " at " . $now->{'time'};
+	my $timeSt = $now->{'date'} . ' at ' . $now->{'time'};
 
 	if ( $funcName ) {
-		if ( testL ( 'd', $dirName ) ) {
-	    $log = "$dirName$funcName.log";
+		if ( testL ( 'd', $dirPath ) ) {
+	    $log = $dirPath . $funcName . '.log';
 		} else {
 	  	my $dir = getcwdL();
-	    $log = "$dir$FS$progNm.log";
+	    $log = $dir . $FS . $progName . '.log';
 		}
-		openL ( \$funcLogFH, '>:encoding(UTF-8)', $log ) or badExit( $funcName, "Not able to create log file\n creating in <$log>" );
+		openL ( \$funcLogFH, '>:encoding(UTF-8)', $log ) or badExit( $funcName, "Not able to create log file: '" . $log . "'" );
 		#redirect STDERR to log file
-		open STDERR, ">>$log";
+		open( STDERR, '>>:encoding(UTF-8)', $log ) or warning( undef, 'Not able to redirect STDERR' );
 		my $oldfh = select $funcLogFH; $| = 1; select $oldfh;
 
 		toLog( $funcName, "$Sep\nFunction: $funcName\n\tDate: $timeSt\n$Sep" );
 	} else {
-    if ( testL ( 'd', $dirName ) ) {
-	    $log = "$dirName$progNm.log";
+    if ( testL ( 'd', $dirPath ) ) {
+	    $log = $dirPath . $progName . '.log';
 	  } else {
 	  	my $dir = getcwdL();
-	    $log = "$dir$FS$progNm.log";
+	    $log = $dir . $FS . $progName . '.log';
+			#if directory not populated in GUI, note to console about current global log location
+	    print "\n *NOTE: The global log file is saved in current directory as:\n  " . $log . "\n\n";
 	  }
-		openL ( \$logFH, '>:encoding(UTF-8)', $log ) or badExit( undef, "Not able to create log file\n creating in <$log>" );
-		#redirect STDERR to log file
-		open STDERR, ">>$log";
-		my $oldfh = select $logFH; $| = 1; select $oldfh;
+		openL ( \$logFH, '>:encoding(UTF-8)', $log );
+		if ( ! fileno( $logFH ) ) {
+			my $logSysErr = decode( $Config{enc_to_system} || 'UTF-8', $! );
+			my $logOS_Err = decode( $Config{enc_to_system} || 'UTF-8', $^E );
+			print "\n\n*ERROR: Not able to create log file: '" . $log . "', returned:\n" . $logSysErr . "\nand:\n" . $logOS_Err . "\n\n";
+			exit( 255 );
+		} else {
+			my $oldfh = select $logFH; $| = 1; select $oldfh;
+			#redirect STDERR to log file
+			open( STDERR, '>>:encoding(UTF-8)', $log ) or warning( undef, 'Not able to redirect STDERR' );
+		}
 
-		toLog( undef, "$SEP\nTool: $progNm\n\tVersion: $Version\n\n\tDate: $timeSt\n$Sep" );
+		toLog( undef, "$SEP\nTool: $progName\n\tVersion: $Version\n\n\tDate: $timeSt\n$Sep" );
+		toLog( undef, "$progName Process Started\n$Sep\n" );
 	}
 }
 
 #----------------------------------------------------------------------------------------------------------
-#write to log file
+# add to log (if subroutine name passed log will be for subroutine, otherwise log will be global)
+# **args:
+#     1 - function name of calling subroutine (opt) [use 'undef' if global]
+#     2 - log message
 sub toLog
 #----------------------------------------------------------------------------------------------------------
 {
 	my ( $funcName, $msg ) = @_;
+	my ( $package, $file, $line, $subname ) = caller( 1 );
+	$subname =~ s#main::##;
+	
 
 	if ( $funcName ) {
 		if ( fileno( $funcLogFH ) ) {
 			print $funcLogFH $msg;
 		} else {
-			#log file is not open, write to error window
-			my ( $package, $file, $line, $subname ) = caller( 1 );
-			$subname =~ s#main::##;
+			#log file is not open, write to error function
 			unless ( $subname =~ m#badExit#i ) {
-				badExit( $funcName, "$msg" );
+				badExit( $funcName, $msg );
 			}
 		}
+	} elsif ( fileno( $logFH ) ) {
+		#write to global log file
+		print $logFH $msg;
 	} else {
-		if ( fileno( $logFH ) ) {
-			print $logFH $msg;
-		} else {
-			#log file is not open, write to error window
-			my ( $package, $file, $line, $subname ) = caller( 1 );
-			$subname =~ s#main::##;
-			unless ( $subname =~ m#badExit#i ) {
-				badExit( undef, "$msg" );
-			}
+		#log file is not open, write to error window
+		unless ( $subname =~ m#badExit#i ) {
+			promptUser( 'error', $msg );
 		}
 	}
 }
 
 #----------------------------------------------------------------------------------------------------------
+# end logging (if subroutine name passed log will be for subroutine, otherwise log will be global)
+# **args:
+#     1 - function name of calling subroutine (opt) [use 'undef' if global]
 sub endLog
 #----------------------------------------------------------------------------------------------------------
 {
   my ( $funcName ) = @_;
 
 	my $now = dateTime();
-	my $timeSt = $now->{'date'} . " at " . $now->{'time'};
+	my $timeSt = $now->{'date'} . ' at ' . $now->{'time'};
 
 	if ( ( $funcName ) && ( fileno( $funcLogFH ) ) ) {
-		toLog( $funcName, "$funcName Process Completed\n$SEP\n\n" );
+		#output any warning data
+		if ( $warn{$funcName} ) {
+			toLog( $funcName, "\n   **(" . $warn{$funcName} . ") Warnings were detected**\n\n" );
+		}
+		toLog( $funcName, "$funcName Process Completed\n\tDate: $timeSt\n$SEP\n\n" );
 		close $funcLogFH;
 	} elsif ( fileno( $logFH ) ) {
-    toLog( undef, "$SEP\nTool: $progNm\n\tVersion: $Version\n\n\tDate: $timeSt\n$Sep" );
-		toLog( undef, "$progNm Process Completed\n$SEP\n\n" );
+		#output any warning data
+		if ( $warn{global} ) {
+			toLog( undef, "\n   **(" . $warn{global} . ") Warnings were detected**\n\n" );
+		}
+    toLog( undef, "$SEP\nTool: $progName\n\tVersion: $Version\n\n\tDate: $timeSt\n$Sep" );
+		toLog( undef, "$progName Process Completed\n$SEP\n\n" );
 		close $logFH;
 	}
 }
 
 #----------------------------------------------------------------------------------------------------------
+# draw main GUI window
 sub tkMainWindow
 #----------------------------------------------------------------------------------------------------------
 {
 	#main window
-	$M->{'window'}->configure( -bg=>TK_COLOR_BG, -fg=>TK_COLOR_FG, -title=>"$progNm..." );
+	$M->{'window'}->configure( -bg=>TK_COLOR_BG, -fg=>TK_COLOR_FG, -title=>"$progName..." );
 	
 	#frames
 	my $title    = $M->{'window'}->Frame( -bg=>TK_COLOR_BG )->grid( -row=>'0' );
@@ -271,7 +291,7 @@ sub tkMainWindow
 		-bg=>TK_COLOR_BG,
 		-fg=>TK_COLOR_FG,
 		-font=>TK_FNT_BIGGER,
-		-text=>"$progNm Tool"
+		-text=>"$progName Tool"
 	)->pack( -pady=>'0' );
 	$title->Label(
 		-bg=>TK_COLOR_BG,
@@ -283,8 +303,8 @@ sub tkMainWindow
 	
 	#directory or file choose frame:
 	#   change the -text value to 'File:' for files
-	#   change the -textvariable value to \$filePath for files
-	#   change the -command value to '[\&tkGetFile, $filePath]' for files
+	#   change the -textvariable value to \$fileFQN for files
+	#   change the -command value to '[\&tkGetFile, $fileFQN]' for files
 	$choose->Label(
 		-text=>'File:',
 		-font=>TK_FNT_BIGB,
@@ -292,7 +312,7 @@ sub tkMainWindow
 		-fg=>TK_COLOR_FG
 	)->pack( -side=>'left' );
 	my $entry = $choose->Entry(
-		-textvariable=>\$filePath,
+		-textvariable=>\$fileFQN,
 		-width=>'30',
 		-bg=>TK_COLOR_FIELD,
 		-fg=>TK_COLOR_FG
@@ -300,7 +320,7 @@ sub tkMainWindow
 	$entry->xview( 'end' );
 	$M->{'select'} = $choose->Button(
 		-text => "...",
-		-command => [ \&tkGetFile, $filePath ],
+		-command => [ \&tkGetFile, $fileFQN ],
 		-bg => TK_COLOR_BG,
 		-fg => TK_COLOR_FG,
 		-activebackground=>TK_COLOR_ABG,
@@ -358,7 +378,7 @@ sub tkMainWindow
 	$M->{'window'}->update();
 	
 	#set focus
-	if ( $dirName ) {
+	if ( $dirPath ) {
 		$M->{'func1'}->focus();
 	} else {
 		$M->{'select'}->focus();
@@ -366,7 +386,10 @@ sub tkMainWindow
 }
 
 #----------------------------------------------------------------------------------------------------------
-#update status in window, 1st arg is current status and 2nd arg is current process
+# update status in GUI window
+# **args:
+#     1 - current status frame
+#     2 - current process status bar
 sub updStatus
 #----------------------------------------------------------------------------------------------------------
 {
@@ -382,6 +405,10 @@ sub updStatus
 #  -if 1st arg specified as 'warning' or 'error', will display that image and include in window title
 #  -3rd arg, and so forth, create buttons
 #  -3rd arg button has default focus
+# **args:
+#     1 - 'warning' or 'error', to display icon (opt) [pass 'undef' if not using]
+#     2 - text for prompt window
+#     3 - array of buttons for answer to prompt (opt) [if not passed, 'OK' will be single button]
 sub promptUser
 #----------------------------------------------------------------------------------------------------------
 {
@@ -399,7 +426,7 @@ sub promptUser
 	unless ( scalar(@buttons) ) {
 		push @buttons, 'OK';
 	}
-	$title = "$progNm...$title";
+	$title = "$progName...$title";
 
 	#create prompt window
 	my $win = $M->{'window'};
@@ -427,52 +454,85 @@ sub promptUser
 }
 
 #----------------------------------------------------------------------------------------------------------
-#user chooses directory
+# GUI directory selection
+# **args:
+#     1 - initial directory selection (opt)
 sub tkGetDir
 #----------------------------------------------------------------------------------------------------------
 {
-	my ( $filePath ) = @_;
-	my $dir;
+	my ( $getDirPath ) = @_;
 
-	if ( testL ( 'e', $filePath ) ) {
-		( undef, $dir ) = fileparse( abspathL ( $filePath ) );
+	if ( $getDirPath ) {
+		$getDirPath =~ s#[\/\\]#$FS#g;
+		if ( $getDirPath !~ m#[\/\\]$# ) {
+			$getDirPath = $getDirPath . $FS;
+		}
+		#if directory already populated & changed, note to console about different global log location
+		print "\n *NOTE: The global log file is saved in opening directory as:\n  " . $log . "\n\n";
 	}
 
-	$filePath = $M->{'window'}->chooseDirectory(
-		-initialdir=>$dir,
-		-title=>'Choose Directory...'
+	$getDirPath = $M->{'window'}->chooseDirectory(
+		-initialdir => $getDirPath,
+		-title			=> 'Choose Directory...'
 	);
 
-	if ( $dir ) {
-		$dirName = $dir;
+	if ( testL ( 'd', $getDirPath ) ) {
+		$dirPath = $getDirPath;
+		$dirPath =~ s#[\/\\]#$FS#g;
+		if ( $dirPath !~ m#[\/\\]$# ) {
+			$dirPath = $dirPath . $FS;
+		}
 	}
 }
 
 #----------------------------------------------------------------------------------------------------------
-#user chooses file
+# GUI file selection
+# **args:
+#     1 - initial file & directory selection (opt)
 sub tkGetFile
 #----------------------------------------------------------------------------------------------------------
 {
 	my ( $getFilePath ) = @_;
+	my ( $currentDir, $dir, $file );
 
-	my ( $dir, $file );
-	if ( $getFilePath ) {
+	$currentDir = $dirPath;
+	#prepare directory for match expression
+	$currentDir =~ s#[\/\\]#\/#g;
+	if ( testL ( 'e', $getFilePath ) ) {
 		( $file, $dir ) = fileparse( abspathL ( $getFilePath ) );
+		#prepare directory for match expression
+		$dir =~ s#[\/\\]#\/#g;
+		$dir =~ s#\$#\\\$#g;
+		#if file already populated & changed (which affects directory), note to console about different global log location
+		if ( $currentDir !~ m#^$dir$#i ) {
+			print "\n *NOTE: The global log file is saved in directory as:\n  " . $log . "\n\n";
+		}
+		#return $dir back
+		$dir =~ s#\\\$#\$#g;
+		$dir =~ s#[\/\\]#$FS#g;
 	}
 
 	$getFilePath = $M->{'window'}->getOpenFile(
-		-initialdir=>$dir,
-		-initialfile=>$file,
-		-title=>'Choose File...'
+		-initialdir		=> $dir,
+		-initialfile	=> $file,
+		-title				=> 'Choose File...'
 	);
 
-	if ( $getFilePath ) {
-		$filePath = $getFilePath;
-		if ( $dir && $file ) {
-			$fileName = $file;
-			$dirName = $dir;
-		} else {
-			( $fileName, $dirName ) = fileparse( abspathL ( $filePath ) );
+	$getFilePath =~ s#[\/\\]#$FS#g;
+	if ( testL ( 'e', $getFilePath ) ) {
+		$fileFQN = $getFilePath;
+		( $fileName, $dirPath ) = fileparse( abspathL ( $fileFQN ) );
+		if ( $dirPath !~ m#[\/\\]$# ) {
+			$dirPath = $dirPath . $FS;
+		}
+
+		#prepare directory for match expression
+		$dir = $dirPath;
+		$dir =~ s#[\/\\]#\/#g;
+		$dir =~ s#\$#\\\$#g;
+		#if file already populated & changed (which affects directory), note to console about different global log location
+		if ( $currentDir !~ m#^$dir$#i ) {
+			print "\n *NOTE: The global log file is saved in directory as:\n  " . $log . "\n\n";
 		}
 	}
 }
@@ -515,10 +575,10 @@ sub tkStart1
 	#starting log process
 	startLog( 'Function1' );
 	
-	#get list of files and change to directory, if $filePath not passed in perl arg
+	#get list of files and change to directory, if $fileFQN not passed in perl arg
 	my @files;
-	if ( testL ( 'e', $filePath ) ) {
-    push( @files, $filePath );
+	if ( testL ( 'e', $fileFQN ) ) {
+    push( @files, $fileFQN );
   } else {
 		@files = getFiles();
 	}
@@ -527,7 +587,7 @@ sub tkStart1
 
 	#process ended
 	my $folderNm;
-	( $folderNm ) = fileparse( abspathL ( $dirName ) );
+	( $folderNm ) = fileparse( abspathL ( $dirPath ) );
 	updStatus( "Finished processing \"" . $folderNm . "\"" );
 	tkEnd( 'Function1' );
 }
@@ -571,10 +631,10 @@ sub tkStart2
 	#starting log process
 	startLog( 'Function2' );
 	
-	#get list of files and change to directory, if $filePath not passed in perl arg
+	#get list of files and change to directory, if $fileFQN not passed in perl arg
 	my @files;
-	if ( testL ( 'e', $filePath ) ) {
-    push( @files, $filePath );
+	if ( testL ( 'e', $fileFQN ) ) {
+    push( @files, $fileFQN );
   } else {
 		@files = getFiles();
 	}
@@ -583,13 +643,15 @@ sub tkStart2
 
 	#process ended
 	my $folderNm;
-	( $folderNm ) = fileparse( abspathL ( $dirName ) );
+	( $folderNm ) = fileparse( abspathL ( $dirPath ) );
 	updStatus( "Finished processing \"" . $folderNm . "\"" );
 	tkEnd( 'Function2' );
 }
 
 #----------------------------------------------------------------------------------------------------------
-# function 1 or function 2 ends successfully - log closed and window refreshed for restart
+# function ends successfully - log closed and window refreshed for restart
+# **args:
+#     1 - function name of calling subroutine (opt) [use 'undef' if global]
 sub tkEnd
 #----------------------------------------------------------------------------------------------------------
 {
@@ -598,7 +660,7 @@ sub tkEnd
 	#close log file
 	endLog( $funcName );
 	undef $log;
-  $log = "$dirName$FS$progNm.log";
+  $log = "$dirPath$FS$progName.log";
 
 	#focus on exit button and reset status
 	$proc = 'Waiting on command...';
@@ -626,18 +688,19 @@ sub tkEnd
 }
 
 #----------------------------------------------------------------------------------------------------------
-# program exits
+# GUI program exit & write out selections from GUI for next run use
 sub tkExit
 #----------------------------------------------------------------------------------------------------------
 {
 	#close log file
-	endLog();
+	endLog( undef );
 
 	$M->{'window'}->destroy;
 	exit( 0 );
 }
 
 #----------------------------------------------------------------------------------------------------------
+# create date & time in readable format
 sub dateTime
 #----------------------------------------------------------------------------------------------------------
 {
@@ -683,23 +746,143 @@ sub progNm
 }
 
 #----------------------------------------------------------------------------------------------------------
-#error in process, write out error to log and/or window and exit
+# save current file/directory selection for next use
+sub saveLastVal
+#----------------------------------------------------------------------------------------------------------
+{
+	my ( $dirOS_Err, $dirSysErr, $lastFH );
+
+	#create last value directory, if not exists
+	my $lastValDir = $ENV{APPDATA} . $FS . $progName;
+	if ( ! testL ( 'd', $lastValDir ) ) {
+		mkdirL ( $lastValDir ) or warning( undef, "Not able to create 'lastValue.cfg' directory: '" . $lastValDir . "'" );
+	}
+
+	my $lastFile = $lastValDir . $FS . 'lastValue.cfg';
+	openL ( \$lastFH, '>:encoding(UTF-8)', $lastFile ) or warning( undef, "Not able to open last value file: '" . $lastFile . "'" );
+	my $lastValFH = select $lastFH; $| = 1; select $lastValFH;
+	if ( $fileFQN && $dirPath ) {
+		print $lastFH $fileFQN . "\n" . $dirPath;
+	} elsif ( $fileFQN ) {
+		print $lastFH $fileFQN;
+	} elsif ( $dirPath ) {
+		print $lastFH "\n" . $dirPath;
+	}
+
+	close( $lastFH );
+}
+
+#----------------------------------------------------------------------------------------------------------
+# read previous run file/directory selection for current use
+sub readLastVal
+#----------------------------------------------------------------------------------------------------------
+{
+	my @lastVal;
+
+	my $lastValDir = $ENV{APPDATA} . $FS . $progName;
+	my $lastFile = $lastValDir . $FS . 'lastValue.cfg';
+	#only read if value not passed
+	if ( ( testL ( 's', $lastFile ) ) && ( ! $ARGV[0] ) ) {
+		my $lastFH;
+		openL ( \$lastFH, '<:encoding(UTF-8)', $lastFile ) or print "\n\n*WARNING: Not able to open last value config file: '" . $lastFile . "'\n\n";
+		@lastVal = <$lastFH>;
+		close( $lastFH );
+
+		#clean up file content
+		chomp( @lastVal );
+		$fileFQN = $lastVal[0];
+		$fileFQN =~ s#[\/\\]#$FS#g;
+		$dirPath = $lastVal[1];
+		$dirPath =~ s#[\/\\]#$FS#g;
+		if ( $lastVal[0] ) {
+			( $fileName, $dirPath ) = fileparse( abspathL ( $fileFQN ) );
+			#value returned in 1st line of lastValue.cfg has zero-width character(s) at end of value - rebuild
+			$fileFQN = $dirPath . $fileName;
+		}
+		if ( $dirPath !~ m#[\/\\]$# ) {
+			$dirPath = $dirPath . $FS;
+		}
+	}
+}
+
+#----------------------------------------------------------------------------------------------------------
+# output & log warning process
+# **args:
+#     1 - function name of calling subroutine (opt) [use 'undef' if global]
+#     2 - warning message
+sub warning
+#----------------------------------------------------------------------------------------------------------
+{
+	my ( $funcName, $msg ) = @_;
+
+	#store any returned system error info
+	my $rawSysWarn = $!;
+	my $rawEvalWarn = $@;
+	my $rawOS_Warn = $^E;
+	#decode raw warning to use Unicode
+	my $sysWarn = decode( $Config{enc_to_system} || 'UTF-8', $rawSysWarn );
+	my $evalWarn = decode( $Config{enc_to_system} || 'UTF-8', $rawEvalWarn );
+	my $OS_Warn = decode( $Config{enc_to_system} || 'UTF-8', $rawOS_Warn );
+	if ( $sysWarn ) {
+	  $msg .= "\n\n *Warn with following Perl system error message: " . $sysWarn;
+	}
+	if ( $evalWarn ) {
+	  $msg .= "\n\n *Warn with following Perl eval error message: " . $evalWarn;
+	}
+	if ( $OS_Warn ) {
+	  $msg .= "\n\n *Warn with following Windows error message: " . $OS_Warn;
+	}
+	updStatus( undef, 'Warning...' );
+
+	#set global warn hash with increasing warning count
+	++$warn{global};
+	if ( $funcName ) {
+		#set warn hash for function with increasing warning count
+		++$warn{$funcName};
+		toLog( $funcName, "\n *WARNING* (" . $warn{$funcName} . "): " . $msg . ",\n" . shortmess() . "\n" );
+	} else {
+		toLog( undef, "\n *WARNING* (" . $warn{global} . "): " . $msg . ",\n" . shortmess() . "\n" );
+	}
+
+	promptUser( 'warning', $msg );
+}
+
+#----------------------------------------------------------------------------------------------------------
+# output & log failed execution process
+# **args:
+#     1 - function name of calling subroutine (opt) [use 'undef' if global]
+#     2 - error message
 sub badExit
 #----------------------------------------------------------------------------------------------------------
 {
 	my ( $funcName, $error ) = @_;
 
 	#store any returned system error info
-	if ( $! or $@ ) {
-	  $error .= "\n\n failed with following error message: $!$@";
+	my $rawSysError = $!;
+	my $rawEvalError = $@;
+	my $rawOS_Error = $^E;
+	#decode raw error to use Unicode
+	my $sysError = decode( $Config{enc_to_system} || 'UTF-8', $rawSysError );
+	my $evalError = decode( $Config{enc_to_system} || 'UTF-8', $rawEvalError );
+	my $OS_Error = decode( $Config{enc_to_system} || 'UTF-8', $rawOS_Error );
+	if ( $sysError ) {
+	  $error .= "\n\n *Failed with following Perl system error message: " . $sysError;
+	}
+	if ( $evalError ) {
+	  $error .= "\n\n *Failed with following Perl eval error message: " . $evalError;
+	}
+	if ( $OS_Error ) {
+	  $error .= "\n\n *Failed with following Windows error message: " . $OS_Error;
 	}
 	updStatus( undef, 'ERROR...' );
 
-	if ( fileno( $funcLogFH ) ) {
+	if ( ( $funcName ) && ( fileno( $funcLogFH ) ) ) {
 		toLog( $funcName, " **ERROR: $error\n" );
-	}
-	if ( fileno( $logFH ) ) {
+	} elsif ( fileno( $logFH ) ) {
 		toLog( undef, " **ERROR: $error\n" );
+	} else {
+		print "\n\n*ERROR: Not able to write to log file: " . $log . "\n";
+		print "Returned error(s):\n" . $error;
 	}
 
 	promptUser( 'error', $error );
@@ -707,14 +890,15 @@ sub badExit
 	#close logs if open
 	if ( ( $funcName ) && ( fileno( $funcLogFH ) ) ) {
 		endLog( $funcName );
-	}
-	if ( fileno( $logFH ) ) {
+	} elsif ( fileno( $logFH ) ) {
 		endLog();
+	} else {
+		print "\n\n*ERROR: Not able to end log file: " . $log;
 	}
 
 	#close window
 	$M->{'window'}->destroy;
 
 	#return exception code
-	exit 255;
+	exit( 255 );
 }
