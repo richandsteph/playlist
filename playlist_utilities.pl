@@ -1,11 +1,12 @@
 #!/usr/bin/perl -w
 
-#**********************************************************************************************************
+#***************************************************************************************************
 #
 #	File: playlist_utilities.pl
-#	Desc: using Tk module for processing window, gives choices to run functions from the following scripts:
-#       1) 'update_ID3_tags' - update ID3 metadata with XML input for song files (then uses command tools 
-#          to populate remaining undefined tags) and update metadata to song files
+#	Desc: using Tk module for processing window, gives choices to run functions from the following 
+#       scripts:
+#       1) 'update_ID3_tags' - update ID3 metadata with XML input for song files (then uses command 
+#          tools to populate remaining undefined tags) and update metadata to song files
 #       2) 'renumber' - renumber KEY values for XML nodes in XML playlist
 #       3) 'make_m3u' - create playlist .m3u file from XML playlist input
 #       4) 'make_XML_playlist' - create an XML playlist from songs crawled in root (starting) 
@@ -16,106 +17,122 @@
 #	Author: Richard Davis
 #         rich@richandsteph.com
 #
-#**********************************************************************************************************
+#***************************************************************************************************
 #
 # Version 1.0 - 31 Jan 2026	 RAD initial creation
-#         1.1 -  1 Feb 2026	 RAD incorporated 'update_ID3_tags' script into function subroutine (replacing 
-#                                tkStart1), changed Tk font to 'Lucida Sans Unicode', changed Warning 
-#                                count to hash of warnings per function & global overall count when 
-#                                logging warnings, standardized error & warning message format, cleaned 
-#                                up some code formatting, changed test for selection (or passing) of 
-#                                file/directory to $filePath in function subroutines, added clean-up of 
-#                                warning within function subroutine to return to MainLoop, changed 
-#                                handling of warning/badExit messages to decode raw message into Unicode 
-#                                characters, removed $FS when using $dirName (which ends in backslash), 
-#                                added some log formatting
-#         1.2 -  1 Feb 2026	 RAD incorporated 'renumber' script into function subroutine / modified all 
-#                                badExit() subroutine calls to decode Unicode in messages / updated TO-DO 
-#                                / reformatted coding
-#         1.3 -  5 Feb 2026	 RAD updated logging messages & formats in logs & console output / removed 
-#                                extraneous code line in getXML_List() / incorporated 'make_m3u' script 
-#                                into function subroutine / removed tkStart2() - unused / added background 
-#                                colors: yellow, medium violet red, & turquoise / incorporated 
-#                                'make_XML_playlist' script into function subroutine / added 
-#                                saving/reading of last value(s) used in selection boxes for next program 
-#                                run / added retrieve of calling subroutine for logging functions, etc. / 
-#                                added getSongList() for populating song files discovered in root 'Music' 
-#                                folder
-#         1.4 -  5 Feb 2026	 RAD refactored use of double quotes to single quotes where interpolation is 
-#                                not required / corrected output of path value for make_XML_playlist() / 
-#                                created $Server & $Share for replacement of drive letter in path in 
-#                                make_XML_playlist() / added 4th permission value for umask() / changed 
-#                                '...' to occur in status bar & not in status frame / added comments for 
-#                                all subroutines, including optional/required arguments / corrected 
-#                                duplicate (or missing) file separator in getSongList() / added directory 
-#                                to .m3u filename in make_m3u() for logging purposes
-#         1.5 -  6 Feb 2026	 RAD changed logging before MainLoop to print to console / corrected adding of 
-#                                ending slash to $dirName in tkGetDir(), tkGetFile(), & readLastVal() / 
-#                                changed match expression to escape special characaters in match for 
-#                                renumber() & extractTags() / added test for content & open log handle in 
-#                                toLog()
-#         1.6 -  7 Feb 2026	 RAD added processing instruction for output of XML in make_XML_playlist() / 
-#                                changed order of cleanTags() to after extractTags() in make_XML_playlist() 
-#                                corrected output of 'year' metadata in make_XML_playlist() / corrected 
-#                                setting tag value to primary tag name in @listOfTagArray in mkvTools() & 
-#                                exifTools() / added stripping of "/[total_tracks]" in 'track' tag / added 
+#         1.1 -  1 Feb 2026	 RAD incorporated 'update_ID3_tags' script into function subroutine 
+#                                (replacing tkStart1), changed Tk font to 'Lucida Sans Unicode', 
+#                                changed Warning count to hash of warnings per function & global 
+#                                overall count when logging warnings, standardized error & warning 
+#                                message format, cleaned up some code formatting, changed test for 
+#                                selection (or passing) of file/directory to $filePath in function 
+#                                subroutines, added clean-up of warning within function subroutine 
+#                                to return to MainLoop, changed handling of warning/badExit 
+#                                messages to decode raw message into Unicode characters, removed 
+#                                $FS when using $dirName (which ends in backslash), added some log 
+#                                formatting
+#         1.2 -  1 Feb 2026	 RAD incorporated 'renumber' script into function subroutine / modified 
+#                                all badExit() subroutine calls to decode Unicode in messages / 
+#                                updated TO-DO / reformatted coding
+#         1.3 -  5 Feb 2026	 RAD updated logging messages & formats in logs & console output / 
+#                                removed extraneous code line in getXML_List() / incorporated 
+#                                'make_m3u' script into function subroutine / removed tkStart2() - 
+#                                unused / added background colors: yellow, medium violet red, & 
+#                                turquoise / incorporated 'make_XML_playlist' script into function 
+#                                subroutine / added saving/reading of last value(s) used in 
+#                                selection boxes for next program run / added retrieve of calling 
+#                                subroutine for logging functions, etc. / added getSongList() for 
+#                                populating song files discovered in root 'Music' folder
+#         1.4 -  5 Feb 2026	 RAD refactored use of double quotes to single quotes where 
+#                                interpolation is not required / corrected output of path value for 
+#                                 make_XML_playlist() / created $Server & $Share for replacement of 
+#                                drive letter in path in make_XML_playlist() / added 4th permission 
+#                                value for umask() / changed '...' to occur in status bar & not in 
+#                                status frame / added comments for all subroutines, including 
+#                                optional/required arguments / corrected duplicate (or missing) 
+#                                file separator in getSongList() / added directory to .m3u filename 
+#                                in make_m3u() for logging purposes
+#         1.5 -  6 Feb 2026	 RAD changed logging before MainLoop to print to console / corrected 
+#                                adding of ending slash to $dirName in tkGetDir(), tkGetFile(), & 
+#                                readLastVal() / changed match expression to escape special 
+#                                characaters in match for renumber() & extractTags() / added test 
+#                                for content & open log handle in toLog()
+#         1.6 -  7 Feb 2026	 RAD added processing instruction for output of XML in 
+#                                make_XML_playlist() / changed order of cleanTags() to after 
+#                                extractTags() in make_XML_playlist() corrected output of 'year' 
+#                                metadata in make_XML_playlist() / corrected setting tag value to 
+#                                primary tag name in @listOfTagArray in mkvTools() & exifTools() / 
+#                                added stripping of "/[total_tracks]" in 'track' tag / added 
 #                                date/time output in make_XML_playlist() ending log entry
-#         1.7 -  7 Feb 2026	 RAD updated output to console in getSongList() / corrected grep statements to 
-#                                match tag name exactly in exifTools() & mkvTools() / corrected storing & 
-#                                looping through XML values, based on priority of @listOfTagArrays in 
-#                                mkvTools() / created deleteFile(), createFile(), & loadXml() for common 
-#                                operations / corrected match expression when determining 'title' & 
-#                                content includes '.' in extractTags() / added calling 'ffprobe' to 
-#                                determine 'bitrate' in mkvTools() / changed matching expression for 
-#                                'bitrate' to accept number in 10,000's in cleanTags() / changed matching 
-#                                expression to properly match folder hierarchy when determining tags by 
-#                                path in extractTags() / added '+' to $albummatch in extractTags() / 
-#                                corrected match expression when determining 'title', 'album', 'artist', 
-#                                etc. from song filename in extractTags() / added test for existence when 
-#                                close() statements in writeTags() / added check for Windows error in 
-#                                badExit() / added check for $funcName when writing toLog() in badExit() / 
-#                                added calling of exifTools() when song file is .mkv, for determining some 
-#                                tags that mkvTools() doesn't
-#         1.8 - 11 Feb 2026	 RAD added calling 'ffprobe' to determine 'title' in mkvTools() / replaced 
-#                                global $filePath with $fileFQN (Fully Qualified Name) / replaced global 
-#                                $dirName with $dirPath (more accurate identifier) / added to tag array: 
-#                                'artists', 'sort_with', & 'part' / removed handling of Unicode errors in 
-#                                each openL() & opendirL(), and moved to handle in badExit() & warning() / 
-#                                added output to console about global log location in tkGetDir() & 
-#                                tkGetFile() / changed running exifTools() in make_XML_playlist() & 
-#                                update_ID3_tags() to only run if not .mkv file type / changed test for 
-#                                population of $fileFQN to test if file exists in make_XML_playlist() & 
-#                                make_m3u() / refactored some logging in make_m3u(), renumber(), & 
-#                                update_ID3_tags() / refactored run3() to decode raw error into Unicode / 
-#                                removed attempted close() & sleep() on song file & temporary song file in 
-#                                writeTags() / added check for .mkv & .m4a song file types in writeTags() 
-#                                to replace certain different tags / changed logging parameter in 
-#                                writeTags() to only log errors / added test of song file size in 
-#                                writeTags() to check for errors
-#         1.9 - 11 Feb 2026	 RAD removed completion test for XML playlist file in make_XML_playlist() / 
-#                                changed completion test for .m3u file in make_m3u() to check for $fileFQN 
-#                                / changed button order in GUI, changed button text to 'Make XML Playlist' 
-#                                & 'Making Playlist...', & changed width of 'Make XML Playlist' button / 
-#                                added test for current directory vs. previous directory in tkGetFile() to 
-#                                print logging message to console / removed mkvTools() calls - using 
-#                                exifTools() for all metadata reading / removed command-line call for 
-#                                utility - using Perl modules for exifTool instead / added use of ExifTool 
-#                                config file / changed check for no tag values to use 'defined' in tag 
-#                                tests in make_XML_playlist() & update_ID3_tags() / refactored some 
-#                                variable names for clarity
-#        1.10 - 13 Feb 2026  RAD added 'avgbitrate' to @listOfTagArrays for 'bitrate' in .m4a song files / 
-#                                replaced use of int() with sprintf() - need rounding / removed defined() 
-#                                in tests where checking for non-empty value / added some value tests when 
-#                                checking for existance of tag value / added rules for checking 'part', 
-#                                'disk', & 'createdate'
+#         1.7 -  7 Feb 2026	 RAD updated output to console in getSongList() / corrected grep 
+#                                statements to match tag name exactly in exifTools() & mkvTools() / 
+#                                corrected storing & looping through XML values, based on priority 
+#                                of @listOfTagArrays in mkvTools() / created deleteFile(), 
+#                                createFile(), & loadXml() for common operations / corrected match 
+#                                expression when determining 'title' & content includes '.' in 
+#                                extractTags() / added calling 'ffprobe' to determine 'bitrate' in 
+#                                mkvTools() / changed matching expression for 'bitrate' to accept 
+#                                number in 10,000's in cleanTags() / changed matching expression to 
+#                                properly match folder hierarchy when determining tags by path in 
+#                                extractTags() / added '+' to $albummatch in extractTags() / 
+#                                corrected match expression when determining 'title', 'album', 
+#                                'artist', etc. from song filename in extractTags() / added test 
+#                                for existence when close() statements in writeTags() / added check 
+#                                for Windows error in badExit() / added check for $funcName when 
+#                                writing toLog() in badExit() / added calling of exifTools() when 
+#                                song file is .mkv, for determining some tags that mkvTools() 
+#                                doesn't
+#         1.8 - 11 Feb 2026	 RAD added calling 'ffprobe' to determine 'title' in mkvTools() / 
+#                                replaced global $filePath with $fileFQN (Fully Qualified Name) / 
+#                                replaced global $dirName with $dirPath (more accurate identifier) 
+#                                / added to tag array: 'artists', 'sort_with', & 'part' / removed 
+#                                handling of Unicode errors in each openL() & opendirL(), and moved 
+#                                to handle in badExit() & warning() / added output to console about 
+#                                global log location in tkGetDir() & tkGetFile() / changed running 
+#                                exifTools() in make_XML_playlist() & update_ID3_tags() to only run 
+#                                if not .mkv file type / changed test for population of $fileFQN to 
+#                                test if file exists in make_XML_playlist() & make_m3u() / 
+#                                refactored some logging in make_m3u(), renumber(), & 
+#                                update_ID3_tags() / refactored run3() to decode raw error into 
+#                                Unicode / removed attempted close() & sleep() on song file & 
+#                                temporary song file in writeTags() / added check for .mkv & .m4a 
+#                                song file types in writeTags() to replace certain different tags / 
+#                                changed logging parameter in writeTags() to only log errors / 
+#                                added test of song file size in writeTags() to check for errors
+#         1.9 - 11 Feb 2026	 RAD removed completion test for XML playlist file in 
+#                                make_XML_playlist() / changed completion test for .m3u file in 
+#                                make_m3u() to check for $fileFQN / changed button order in GUI, 
+#                                changed button text to 'Make XML Playlist' & 'Making Playlist...', 
+#                                & changed width of 'Make XML Playlist' button / added test for 
+#                                current directory vs. previous directory in tkGetFile() to print 
+#                                logging message to console / removed mkvTools() calls - using 
+#                                exifTools() for all metadata reading / removed command-line call 
+#                                for utility - using Perl modules for exifTool instead / added 
+#                                use of ExifTool config file / changed check for no tag values to 
+#                                use 'defined' in tag tests in make_XML_playlist() & 
+#                                update_ID3_tags() / refactored some variable names for clarity
+#        1.10 - 13 Feb 2026  RAD added 'avgbitrate' to @listOfTagArrays for 'bitrate' in .m4a song 
+#                                files / replaced use of int() with sprintf() - need rounding / 
+#                                removed defined() in tests where checking for non-empty value / 
+#                                added some value tests when checking for existance of tag value / 
+#                                added rules for checking 'part', 'disk', & 'createdate'
+#        1.11 - 19 Feb 2026  RAD remove iTunes comments / reorder buttons in GUI / moved badExit() 
+#                                to after sleep() after renameL() in writeTags() / add "?" to 
+#                                escape pattern in matches in renumber() & extractTags() / changed 
+#                                button text in GUI / replaced 'createdate' with 'date' for .m4a 
+#                                song file type - refactored 'date' processing / refactored 
+#                                comments & logging separators / moved further tag cleanup from 
+#                                writeTags() to cleanTags() for better organization / replacing 
+#                                renameL() with copyL() when creating '_tmp' temporary song file in 
+#                                writeTags()
 #
 #
 #   TO-DO:
-#         1) none
+#         1) Finish testing of copyL(), replacing renameL()
 #
-#**********************************************************************************************************
+#***************************************************************************************************
 
-my $Version = '1.10';
+my $Version = '1.11';
 
 use strict;
 use warnings;
@@ -138,7 +155,7 @@ use Tk::DialogBox;
 use XML::LibXML;
 use XML::Writer;
 use Win32;
-use Win32::LongPath qw( abspathL chdirL getcwdL mkdirL openL renameL testL unlinkL );
+use Win32::LongPath qw( abspathL chdirL copyL getcwdL mkdirL openL renameL testL unlinkL );
 
 #Tk setup
 #colors from rgb.txt
@@ -165,8 +182,8 @@ umask 0000;
 #global variables
 my ( $dirPath, $fileFQN, $fileName, $log );
 my $FS = '\\';
-my $Sep = '-' x 110;
-my $SEP = '=' x 110;
+my $Sep = '-' x 100;
+my $SEP = '=' x 100;
 #specify server\share for replacement of drive letter in path
 my $Server = 'DavisServer_1';
 my $Share = 'Movies_Music_Pics';
@@ -205,7 +222,7 @@ my @listOfTagArrays = (
 	[ 'title' ],
 	[ 'titlesortorder', 'titlesort', 'sort_with' ],
 	[ 'track', 'part', 'tracknumber', 'part_number', 'trackid' ],
-	[ 'year', 'date', 'createdate', 'originaldate', 'originalreleaseyear', 'release_date', 'datetimeoriginal', 'recordingdates' ]
+	[ 'year', 'date', 'contentcreatedate', 'originaldate', 'originalreleaseyear', 'release_date', 'datetimeoriginal', 'recordingdates' ]
 );
 
 #array list of necessary ID3 tags for XML output, in order of desired XML output
@@ -250,12 +267,12 @@ my $M->{'window'} = MainWindow->new();
 tkMainWindow();
 MainLoop;
 
-#----------------------------------------------------------------------------------------------------------
+#---------------------------------------------------------------------------------------------------
 # change keys in hash to lowercase
 # **args:
 #     1 - hash reference
 sub lowerHashCase
-#----------------------------------------------------------------------------------------------------------
+#---------------------------------------------------------------------------------------------------
 {
 	my $hashRef = shift;
 	foreach my $key ( keys %{$hashRef} ) {
@@ -276,10 +293,10 @@ sub lowerHashCase
 	return $hashRef;
 }
 
-#----------------------------------------------------------------------------------------------------------
+#---------------------------------------------------------------------------------------------------
 # convert HH:MM:SS length into seconds
 sub convertLength
-#----------------------------------------------------------------------------------------------------------
+#---------------------------------------------------------------------------------------------------
 {
     my @time_parts = reverse( split( ':', $_[0] ) );
     my $accum = 0;
@@ -289,10 +306,10 @@ sub convertLength
     return $accum;
 }
 
-#----------------------------------------------------------------------------------------------------------
+#---------------------------------------------------------------------------------------------------
 # create date & time in readable format
 sub dateTime
-#----------------------------------------------------------------------------------------------------------
+#---------------------------------------------------------------------------------------------------
 {
 	my ( $sec, $min, $hr, $day, $monNum, $yr );
 	my $tod = 'am';
@@ -319,10 +336,10 @@ sub dateTime
 	return( $now );		
 }
 
-#----------------------------------------------------------------------------------------------------------
+#---------------------------------------------------------------------------------------------------
 # return the name of the program currently running
 sub progName
-#----------------------------------------------------------------------------------------------------------
+#---------------------------------------------------------------------------------------------------
 {
 	my $prog;
 
@@ -338,14 +355,14 @@ sub progName
 	return( $prog );
 }
 
-#----------------------------------------------------------------------------------------------------------
+#---------------------------------------------------------------------------------------------------
 # delete file & log error/warning messages
 # **args:
 #     1 - file to delete
 #     2 - $subName from passing routine
 #     3 - description of file
 sub deleteFile
-#----------------------------------------------------------------------------------------------------------
+#---------------------------------------------------------------------------------------------------
 {
 	my ( $file, $subName, $desc ) = @_;
 
@@ -361,7 +378,7 @@ sub deleteFile
 	return;
 }
 
-#----------------------------------------------------------------------------------------------------------
+#---------------------------------------------------------------------------------------------------
 # create file & log error/warning messages
 # **args:
 #     1 - file to create
@@ -369,7 +386,7 @@ sub deleteFile
 #     3 - content of file
 #     4 - description of file
 sub createFile
-#----------------------------------------------------------------------------------------------------------
+#---------------------------------------------------------------------------------------------------
 {
 	my ( $file, $subName, $content, $desc ) = @_;
 	my $fileFH;
@@ -384,13 +401,13 @@ sub createFile
 	return;
 }
 
-#----------------------------------------------------------------------------------------------------------
+#---------------------------------------------------------------------------------------------------
 # load XML instance and return $dom object
 # **args:
 #     1 - file to load
 #     2 - $subName from passing routine
 sub loadXml
-#----------------------------------------------------------------------------------------------------------
+#---------------------------------------------------------------------------------------------------
 {
 	my ( $file, $subName ) = @_;
 	my ( $dom, $xmlFH );
@@ -408,10 +425,10 @@ sub loadXml
 	return( $dom );
 }
 
-#----------------------------------------------------------------------------------------------------------
+#---------------------------------------------------------------------------------------------------
 # read directory and return a list of XML files [$dirPath must be populated globally]
 sub getXML_List
-#----------------------------------------------------------------------------------------------------------
+#---------------------------------------------------------------------------------------------------
 {
 	my @xmlList;
 
@@ -439,13 +456,13 @@ sub getXML_List
 	return( @newList );
 }
 
-#----------------------------------------------------------------------------------------------------------
+#---------------------------------------------------------------------------------------------------
 # read directory & recurse subdirectories to return a list of song file
 # **args:
 #     1 - array reference for song file list
 #     2 - directory to crawl
 sub getSongList
-#----------------------------------------------------------------------------------------------------------
+#---------------------------------------------------------------------------------------------------
 {
 	my ( $songArrayRef, $workingDir ) = @_;
 
@@ -485,10 +502,10 @@ sub getSongList
 	return;
 }
 
-#----------------------------------------------------------------------------------------------------------
+#---------------------------------------------------------------------------------------------------
 # draw main GUI window
 sub tkMainWindow
-#----------------------------------------------------------------------------------------------------------
+#---------------------------------------------------------------------------------------------------
 {
 	#main window
 	$M->{'window'}->configure(
@@ -611,21 +628,6 @@ sub tkMainWindow
 	);
 
 	#buttons1 frame
-	$M->{'update_ID3_tags'} = $buttons1->Button(
-		-text								=> 'Update ID3 Tags',
-		-font								=> TK_FNT_B,
-		-command						=> \&update_ID3_tags,
-		-borderwidth				=> '4',
-		-bg									=> TK_COLOR_BG,
-		-fg									=> TK_COLOR_FG,
-		-activebackground		=> TK_COLOR_YELLOW,
-		-disabledforeground => TK_COLOR_GREYBUT,
-		-width							=> '14'
-	)->pack(
-		-side								=> 'left',
-		-padx								=> '2',
-		-pady								=> '0'
-	);
 	$M->{'make_XML_playlist'} = $buttons1->Button(
 		-text								=> 'Make XML Playlist',
 		-font								=> TK_FNT_B,
@@ -636,6 +638,21 @@ sub tkMainWindow
 		-activebackground		=> TK_COLOR_ABG,
 		-disabledforeground => TK_COLOR_GREYBUT,
 		-width							=> '16'
+	)->pack(
+		-side								=> 'left',
+		-padx								=> '2',
+		-pady								=> '8'
+	);
+	$M->{'update_ID3_tags'} = $buttons1->Button(
+		-text								=> 'Update ID3 Tags',
+		-font								=> TK_FNT_B,
+		-command						=> \&update_ID3_tags,
+		-borderwidth				=> '4',
+		-bg									=> TK_COLOR_BG,
+		-fg									=> TK_COLOR_FG,
+		-activebackground		=> TK_COLOR_YELLOW,
+		-disabledforeground => TK_COLOR_GREYBUT,
+		-width							=> '14'
 	)->pack(
 		-side								=> 'left',
 		-padx								=> '2',
@@ -720,13 +737,13 @@ sub tkMainWindow
 	$M->{'select'}->focus();
 }
 
-#----------------------------------------------------------------------------------------------------------
+#---------------------------------------------------------------------------------------------------
 # update status in GUI window
 # **args:
 #     1 - current status frame
 #     2 - current process status bar
 sub updStatus
-#----------------------------------------------------------------------------------------------------------
+#---------------------------------------------------------------------------------------------------
 {
 	if ( $_[0] ) { $stat = $_[0] };
 	if ( $_[1] ) { $proc = $_[1] };
@@ -734,10 +751,11 @@ sub updStatus
 	$M->{'window'}->update();
 }
 
-#----------------------------------------------------------------------------------------------------------
+#---------------------------------------------------------------------------------------------------
 # creates prompt window
 #  -returns user's response (name of button)
-#  -if 1st arg specified as 'warning' or 'error', will display that image and include in window title
+#  -if 1st arg specified as 'warning' or 'error', will display that image and include in window 
+#   title
 #  -3rd arg, and so forth, create buttons
 #  -3rd arg button has default focus
 # **args:
@@ -745,7 +763,7 @@ sub updStatus
 #     2 - text for prompt window
 #     3 - array of buttons for answer to prompt (opt) [if not passed, 'OK' will be single button]
 sub promptUser
-#----------------------------------------------------------------------------------------------------------
+#---------------------------------------------------------------------------------------------------
 {
 	my ( $type, $txt, @buttons ) = @_;
 	my $image = '';
@@ -793,12 +811,12 @@ sub promptUser
 	return( $ans );
 }
 
-#----------------------------------------------------------------------------------------------------------
+#---------------------------------------------------------------------------------------------------
 # GUI directory selection
 # **args:
 #     1 - initial directory selection (opt)
 sub tkGetDir
-#----------------------------------------------------------------------------------------------------------
+#---------------------------------------------------------------------------------------------------
 {
 	my ( $getDirPath ) = @_;
 
@@ -825,12 +843,12 @@ sub tkGetDir
 	}
 }
 
-#----------------------------------------------------------------------------------------------------------
+#---------------------------------------------------------------------------------------------------
 # GUI file selection
 # **args:
 #     1 - initial file & directory selection (opt)
 sub tkGetFile
-#----------------------------------------------------------------------------------------------------------
+#---------------------------------------------------------------------------------------------------
 {
 	my ( $getFilePath ) = @_;
 	my ( $currentDir, $dir, $file );
@@ -877,12 +895,12 @@ sub tkGetFile
 	}
 }
 
-#----------------------------------------------------------------------------------------------------------
-# update GUI & create XML playlist from selected root 'Music' folder, crawls all artist/album subfolders, 
-#   calls command-line utility for extraction based on song file type
+#---------------------------------------------------------------------------------------------------
+# update GUI & create XML playlist from selected root 'Music' folder, crawls all artist/album 
+#   subfolders, calls command-line utility for extraction based on song file type
 #  - $dirPath must be populated globally (user directory selection in GUI)
 sub make_XML_playlist
-#----------------------------------------------------------------------------------------------------------
+#---------------------------------------------------------------------------------------------------
 {
 	#determine subroutine
 	my ( $package, $file, $line, $subName ) = caller( 0 );
@@ -936,9 +954,9 @@ sub make_XML_playlist
 	#starting log process
 	toLog( undef, "  Creating XML Playlist...\n    See '" . $dirPath . $subName . ".log' for details\n\n" );
 	startLog( $subName );
-	
-	toLog( $subName, "Scouring Music folders to build list of song files...\n" );
+	toLog( $subName, "Creating XML Playlist from directory: '" . $dirPath . "'\n" );
 
+	toLog( $subName, " - Scouring Music folders to build list of song files...\n" );
 	my @songList;
 	print "\n  Crawling through folders:\n";
 	getSongList( \@songList, $dirPath );
@@ -1116,12 +1134,12 @@ sub make_XML_playlist
 	tkEnd( $subName );
 }
 
-#----------------------------------------------------------------------------------------------------------
+#---------------------------------------------------------------------------------------------------
 # update GUI & create .m3u playlist from XML playlist
 #  - runs on single XML playlist file, when $fileName populated (1st priority)
 #  - gathers XML playlist files in selected directory, when $dirPath populated
 sub make_m3u
-#----------------------------------------------------------------------------------------------------------
+#---------------------------------------------------------------------------------------------------
 {
 	#determine subroutine
 	my ( $package, $file, $line, $subName ) = caller( 0 );
@@ -1274,12 +1292,13 @@ sub make_m3u
 	tkEnd( $subName );
 }
 
-#----------------------------------------------------------------------------------------------------------
-# update GUI & renumber XML nodes in selected XML playlist file(s) or directory of XML playlist file(s)
+#---------------------------------------------------------------------------------------------------
+# update GUI & renumber XML nodes in selected XML playlist file(s) or directory of XML playlist 
+#   file(s)
 #  - runs on single XML playlist file, when $fileName populated (1st priority)
 #  - gathers XML playlist files in selected directory, when $dirPath populated
 sub renumber
-#----------------------------------------------------------------------------------------------------------
+#---------------------------------------------------------------------------------------------------
 {
 	#determine subroutine
 	my ( $package, $file, $line, $subName ) = caller( 0 );
@@ -1376,7 +1395,7 @@ sub renumber
 		my $nodeCnt = 0;
 		#set date in <playlist> attribute
 		my $playlistNode = $dom->findnodes( '/playlist' );
-		toLog( $subName, "\tSetting current date/time in <playlist> node\n" );
+		toLog( $subName, "   - Setting current date/time in <playlist> node\n" );
 		#get playlist @name for writing out
 		my @playlistName = $dom->findvalue( '/playlist/@name' );
 		my $now = dateTime();
@@ -1409,7 +1428,7 @@ sub renumber
 				if ( $nodeName =~ m#^title$#i ) {
 					my $titleContent = $subNode->textContent;
 					foreach my $val ( values( %title ) ) {
-						$titleContent =~ s#([\(\)\[\]\*\+])#\$1#g;
+						$titleContent =~ s#([\(\)\[\]\*\+\?])#\$1#g;
 						if ( $val =~ m#^$titleContent$#i ) {
 							toLog( $subName, "\tNOTE: The content '" . $titleContent . "' in <title> of <song> no. " . $nodeCnt . " is duplicated\n" );
 						}
@@ -1472,12 +1491,12 @@ sub renumber
 	tkEnd( $subName );
 }
 
-#----------------------------------------------------------------------------------------------------------
-# update GUI & update ID3 metadata in song files with XML input from XML playlist file, calls command-line 
-#   utility for orignial extraction based on song file type
+#---------------------------------------------------------------------------------------------------
+# update GUI & update ID3 metadata in song files with XML input from XML playlist file, calls 
+#   command-line utility for orignial extraction based on song file type
 #  - $fileName must be populated globally (user file selection in GUI)
 sub update_ID3_tags
-#----------------------------------------------------------------------------------------------------------
+#---------------------------------------------------------------------------------------------------
 {
 	#determine subroutine
 	my ( $package, $file, $line, $subName ) = caller( 0 );
@@ -1496,7 +1515,7 @@ sub update_ID3_tags
 
 	#change buttons to indicate process started
 	$M->{'update_ID3_tags'}->configure(
-		-text							=> 'Updating...',
+		-text							=> 'Updating ID3...',
 		-font							=> TK_FNT_B,
 		-state						=> 'disabled',
 		-fg								=> TK_COLOR_GREYBUT,
@@ -1537,8 +1556,8 @@ sub update_ID3_tags
 	#separate out playlist XML filename and directory
 	my ( $playlistFilename, $playlistFilePath ) = fileparse( abspathL ( $fileFQN ) );
 	$playlistFilename =~ s#\.\w\w\w?$##;
-	#echo status to console
 	toLog( $subName, "Updating ID3 Tags in XML playlist file: '" . $playlistFilename . ".xml'...\n" );
+	#echo status to console
 	binmode( STDOUT, ":encoding(UTF-8)" );
 	print "\n   Updating ID3 Tags in: '" . $playlistFilename . ".xml'\n";
 	
@@ -1656,15 +1675,15 @@ sub update_ID3_tags
 	tkEnd( $subName );
 }
 
-#----------------------------------------------------------------------------------------------------------
-# extract metadata from song file for .mkv song file type, uses 'mkvextract' command-line utility for 
-#   extraction
+#---------------------------------------------------------------------------------------------------
+# extract metadata from song file for .mkv song file type, uses 'mkvextract' command-line utility 
+#   for extraction
 # **args:
 #     1 - number of current song file
 #     2 - tags hash reference
 #     3 - song file to be run on
 sub mkvTools
-#----------------------------------------------------------------------------------------------------------
+#---------------------------------------------------------------------------------------------------
 {
 	my ( $num, $tagsRef, $songFile ) = @_;
 
@@ -1821,14 +1840,14 @@ sub mkvTools
 	}
 }
 
-#----------------------------------------------------------------------------------------------------------
+#---------------------------------------------------------------------------------------------------
 # generic extract metadata from song file, calls 'exifTool' command-line utility for extraction
 # **args:
 #     1 - number of current song file
 #     2 - tags hash reference
 #     3 - song file to be run on
 sub exifTools
-#----------------------------------------------------------------------------------------------------------
+#---------------------------------------------------------------------------------------------------
 {
 	my ( $num, $tagsRef, $songFile ) = @_;
 
@@ -1844,11 +1863,11 @@ sub exifTools
 	my $exifTool = Image::ExifTool->new;
 	$exifHashRef = $exifTool->ImageInfo( $encSongFile );
 	foreach my $key ( keys %{$exifHashRef} ) {
-		my $decodedVal = decode( $Config{enc_to_system} || 'UTF-8', ${$exifHashRef}{$key} );
+		my $decValue = decode( $Config{enc_to_system} || 'UTF-8', ${$exifHashRef}{$key} );
 		my $lcKey = lc( $key );
-		foreach my $tagArrayRef ( @listOfTagArrays ) {
-			if ( grep /^$lcKey$/, @{$tagArrayRef} ) {
-				$tagsRef->{$lcKey} = $decodedVal unless ( $tagsRef->{$lcKey} );
+		foreach my $tagArrayName ( @listOfTagArrays ) {
+			if ( grep /^$lcKey$/, @{$tagArrayName} ) {
+				$tagsRef->{$lcKey} = $decValue unless ( $tagsRef->{$lcKey} );
 			}
 		}
 	}
@@ -1877,13 +1896,13 @@ sub exifTools
 	}
 }
 
-#----------------------------------------------------------------------------------------------------------
+#---------------------------------------------------------------------------------------------------
 # check each tag in hash - to set/clean-up values and/or modify/delete values
 # **args:
 #     1 - tags hash reference
 #     2 - song file to be run on
 sub cleanTags
-#----------------------------------------------------------------------------------------------------------
+#---------------------------------------------------------------------------------------------------
 {
 	my ( $tagsRef, $songFile ) = @_;
 
@@ -1917,7 +1936,7 @@ sub cleanTags
 		$tagsRef->{$key} =~ s#"#\N{U+201D}#g;
 
 		#clean 'artist'
-		if ( $key =~ m#^artist$# ) {
+		if ( $key =~ m#^artist$#i ) {
 			#correct 'AC/DC'
 			$tagsRef->{$key} =~ s#^AC[_ ]DC$#AC\/DC#i;
 			#set 'albumartist' if not specified
@@ -1932,30 +1951,46 @@ sub cleanTags
 				#strip starting articles
 				$tagsRef->{artistsortorder} =~ s#^(the|a|an)\s+(.+)#$2#i;
 			}
-			#set 'band' if not specified, when it exists already
-			if ( ( exists $tagsRef->{band} ) && ( ! $tagsRef->{band} ) ) {
+			#set 'band' if not specified
+			if ( ! $tagsRef->{band} ) {
 				$tagsRef->{band} = $tagsRef->{$key};
 			}
-			#set 'ensemble' if not specified, when it exists already
-			if ( ( exists $tagsRef->{ensemble} ) && ( ! $tagsRef->{ensemble} ) ) {
+			#set 'ensemble' if not specified
+			if ( ! $tagsRef->{ensemble} ) {
 				$tagsRef->{ensemble} = $tagsRef->{$key};
 			}
-			#rename certain tags to .m4a or .mkv specific tags
 			if ( $songFile =~ m#\.m4a$#i ) {
 				$tagsRef->{author} = $tagsRef->{$key} unless ( $tagsRef->{author} );
-				$tagsRef->{album_artist} = $tagsRef->{albumartist} unless ( $tagsRef->{album_artist} );
 			} elsif ( $songFile =~ m#\.mkv$#i ) {
-				$tagsRef->{album_artist} = $tagsRef->{albumartist} unless ( $tagsRef->{album_artist} );
 				$tagsRef->{artists} = $tagsRef->{$key} unless ( $tagsRef->{artists} );
 			}
-		} elsif ( $key =~ m#^title$# ) {
+		} elsif ( ( $key =~ m#^author$#i ) && ( $songFile =~ m#\.m4a$#i ) ) {
+			$tagsRef->{artist} = $tagsRef->{$key} unless ( $tagsRef->{artist} );
+		} elsif ( ( $key =~ m#^artists$#i ) && ( $songFile =~ m#\.mkv$#i ) ) {
+			$tagsRef->{artist} = $tagsRef->{$key} unless ( $tagsRef->{artist} );
+		} elsif ( $key =~ m#^title$#i ) {
 			#set 'titlesortorder' if not specified
 			if ( ! $tagsRef->{titlesortorder} ) {
 				$tagsRef->{titlesortorder} = $tagsRef->{$key};
 				#strip starting articles
 				$tagsRef->{titlesortorder} =~ s#^(the|a|an)\s+(.+)#$2#i;
 			}
-		} elsif ( $key =~ m#^albumartist$# ) {
+			if ( ( ! $tagsRef->{sort_with} ) && ( $songFile =~ m#\.mkv$#i ) ) {
+				$tagsRef->{sort_with} = $tagsRef->{$key};
+				#strip starting articles
+				$tagsRef->{sort_with} =~ s#^(the|a|an)\s+(.+)#$2#i;
+			}
+		} elsif ( $key =~ m#^titlesort(order)?$#i ) {
+			#strip starting articles
+			$tagsRef->{$key} =~ s#^(the|a|an)\s+(.+)#$2#i;
+			if ( ( ! $tagsRef->{sort_with} ) && ( $songFile =~ m#\.mkv$#i ) ) {
+				$tagsRef->{sort_with} = $tagsRef->{$key};
+			}
+		} elsif ( ( $key =~ m#^sort_with$#i ) && ( $songFile =~ m#\.mkv$#i ) ) {
+			#strip starting articles
+			$tagsRef->{$key} =~ s#^(the|a|an)\s+(.+)#$2#i;
+			$tagsRef->{titlesortorder} = $tagsRef->{$key} unless ( $tagsRef->{titlesortorder} );
+		} elsif ( $key =~ m#^albumartist$#i ) {
 			#correct 'AC/DC'
 			$tagsRef->{$key} =~ s#^AC[_ ]DC$#AC\/DC#i;
 			#remove extra artist info
@@ -1966,7 +2001,14 @@ sub cleanTags
 				#strip starting articles
 				$tagsRef->{albumartistsortorder} =~ s#^(the|a|an)\s+(.+)#$2#i;
 			}
-		} elsif ( $key =~ m#^album$# ) {
+			#add specified tags for .m4a or .mkv song file type
+			if ( ( ! $tagsRef->{album_artist} ) && ( $songFile =~ m#\.(m4a|mkv)$#i ) ) {
+				$tagsRef->{album_artist} = $tagsRef->{$key};
+			}
+		} elsif ( ( $key =~ m#^album_artist$#i ) && ( $songFile =~ m#\.(m4a|mkv)$#i ) ) {
+			#set standard 'albumartist' if .m4a/.mkv song file type
+			$tagsRef->{albumartist} = $tagsRef->{$key} unless ( $tagsRef->{albumartist} );
+		} elsif ( $key =~ m#^album$#i ) {
 			#set 'albumsortorder' if not specified
 			if ( ! $tagsRef->{albumsortorder} ) {
 				$tagsRef->{albumsortorder} = $tagsRef->{$key};
@@ -1978,40 +2020,62 @@ sub cleanTags
 			if ( $tagsRef->{$key} =~ m#(\d+)\/\d+# ) {
 				$tagsRef->{$key} = $1;
 			}
-			if ( $songFile =~ m#\.(ogg|flac)$#i ) {
-				$tagsRef->{tracknumber} = $tagsRef->{$key} unless ( $tagsRef->{tracknumber} );
-			} elsif ( $songFile =~ m#\.mkv$#i ) {
-				$tagsRef->{part_number} = $tagsRef->{$key} unless ( $tagsRef->{part_number} );
+			if ( ( ! $tagsRef->{tracknumber} ) && ( $songFile =~ m#\.(ogg|flac)$#i ) ) {
+				$tagsRef->{tracknumber} = $tagsRef->{$key};
+			} elsif ( ( ! $tagsRef->{part_number} ) && ( $songFile =~ m#\.mkv$#i ) ) {
+				$tagsRef->{part_number} = $tagsRef->{$key};
+			} elsif ( ( ! $tagsRef->{part} ) && ( $songFile =~ m#\.m4a$#i ) ) {
+				$tagsRef->{part} = $tagsRef->{$key};
 			}
-		} elsif ( ( $key =~ m#^part$#i ) && ( $songFile =~ m#\.m4a$# ) ) {
+		} elsif ( ( $key =~ m#^tracknumber$#i ) && ( $songFile =~ m#\.mkv$#i ) ) {
 			#remove total number
 			if ( $tagsRef->{$key} =~ m#(\d+)\/\d+# ) {
 				$tagsRef->{$key} = $1;
 			}
-		} elsif ( ( $key =~ m#^disk$#i ) && ( $songFile =~ m#\.m4a$# ) ) {
-			if ( ! $tagsRef->{discnumber} ) {
-				$tagsRef->{discnumber} = $tagsRef->{$key};
+			$tagsRef->{track} = $tagsRef->{$key} unless ( $tagsRef->{track} );
+		} elsif ( ( $key =~ m#^part_number$#i ) && ( $songFile =~ m#\.mkv$#i ) ) {
+			#remove total number
+			if ( $tagsRef->{$key} =~ m#(\d+)\/\d+# ) {
+				$tagsRef->{$key} = $1;
 			}
-		} elsif ( ( $key =~ m#^createdate$#i ) && ( $songFile =~ m#\.m4a$# ) ) {
-			#remove if set to 0's
-			if ( $tagsRef->{$key} =~ m#^0000:# ) {
-				delete $tagsRef->{$key};
-			} elsif ( $tagsRef->{$key} =~ m#^0000$# ) {
-				#if copied from year, then reset for writing metadata in writeTags()
-				$tagsRef->{$key} .= ':01:01 00:00:00';
+			$tagsRef->{track} = $tagsRef->{$key} unless ( $tagsRef->{track} );
+		} elsif ( ( $key =~ m#^part$#i ) && ( $songFile =~ m#\.(m4a|mkv)$#i ) ) {
+			#remove total number
+			if ( $tagsRef->{$key} =~ m#(\d+)\/\d+# ) {
+				$tagsRef->{$key} = $1;
 			}
+			$tagsRef->{track} = $tagsRef->{$key} unless ( $tagsRef->{track} );
+		} elsif ( ( $key =~ m#^disk$#i ) && ( $songFile =~ m#\.m4a$#i ) ) {
+			#set standard 'discnumber' if .m4a song file type
+			if ( ( ! $tagsRef->{discnumber} ) && ( $tagsRef->{$key} ) ) {
+				$tagsRef->{discnumber} = $tagsRef->{$key} unless ( $tagsRef->{discnumber} );
+			}
+		} elsif ( ( $key =~ m#^date$#i ) && ( $songFile =~ m#\.m4a$#i ) ) {
+			#remove extraneous
+			$tagsRef->{$key} =~ s#^(\d{4}).*$#$1#;
+			#remove if year set to 0's
+			delete $tagsRef->{$key} if ( $tagsRef->{$key} =~ m#^0000# );
+			#set standard 'year'
+			$tagsRef->{year} = $tagsRef->{$key} unless ( $tagsRef->{year} );
 		} elsif ( $key =~ m#^year$#i ) {
 			#remove extraneous from 'year' value
-			$tagsRef->{$key} =~ s#^(\d\d\d\d).*$#$1#;
+			$tagsRef->{$key} =~ s#^(\d{4}).*$#$1#;
 			#remove tag if year is '0000'
-			delete $tagsRef->{$key} if ( $tagsRef->{$key} =~ m#^0000$# );
-			#remove 'createdate' tag for .m4a song files, if set to 0's
+			delete $tagsRef->{$key} if ( $tagsRef->{$key} =~ m#^0000# );
+			#set to 'date' tag, if empty
 			if ( $tagsRef->{$key} =~ m#^$# ) {
 				if ( ( $tagsRef->{date} ) && ( $tagsRef->{date} !~ m#^$# ) ) {
 					#remove extraneous
-					$tagsRef->{date} =~ s#^(\d\d\d\d).*$#$1#;
+					$tagsRef->{date} =~ s#^(\d{4}).*$#$1#;
+					#force 'year' equal to 'date'
 					$tagsRef->{$key} = $tagsRef->{date};
+					#set key 'date' to empty (will remove in ffmpeg)
+					$tagsRef->{date} = '' unless ( $songFile =~ m#\.m4a$#i );
 				}
+			}
+			#set 'date' & remove 'year' for .m4a song file type
+			if ( ( ! $tagsRef->{date} ) && ( $songFile =~ m#\.m4a$#i ) ) {
+				$tagsRef->{date} = $tagsRef->{$key};
 			}
 		} elsif ( $key =~ m#^bitrate$#i ) {
 			#match at least 5 digits (for 10,000's), but also capture any trailing digits & leaving rest off)
@@ -2028,7 +2092,10 @@ sub cleanTags
 				$tagsRef->{$key} =~ s#^([\d\.]+).*$#$1#;
 				$tagsRef->{$key} = sprintf "%d", $tagsRef->{$key};
 			}
-		} elsif ( ( $key =~ m#^avgbitrate$#i ) && ( $songFile =~ m#\.m4a$# ) ) {
+			if ( ( ! $tagsRef->{avgbitrate} ) && ( $songFile =~ m#\.m4a$#i ) ) {
+				$tagsRef->{avgbitrate} = $tagsRef->{$key};
+			}
+		} elsif ( ( $key =~ m#^avgbitrate$#i ) && ( $songFile =~ m#\.m4a$#i ) ) {
 			if ( $tagsRef->{$key} =~ m#^([\d\.]+)\s+Mbps$#i ) {
 				#bitrate in Mbps
 				$tagsRef->{$key} = $1;
@@ -2043,7 +2110,7 @@ sub cleanTags
 			#if 'comment' has previously used diagnostic text, remove it
 			if ( ( $tagsRef->{$key} =~ m#created from filename#i ) || ( $tagsRef->{$key} =~ m#updated with default#i ) || ( $tagsRef->{$key} =~ m#^vendor$#i ) ) {
 				$tagsRef->{$key} = '';
-			} elsif ( ( $tagsRef->{$key} =~ m#^\s*0000# ) || ( $tagsRef->{$key} =~ m#^\s+$#i ) ) {
+			} elsif ( ( $tagsRef->{$key} =~ m#^\s*0000# ) || ( $tagsRef->{$key} =~ m#^\(iTunNORM\)#i ) || ( $tagsRef->{$key} =~ m#^\s+$#i ) ) {
 				#long range of numbers or space
 				$tagsRef->{$key} = '';
 			}
@@ -2101,20 +2168,22 @@ sub cleanTags
 			}
 		}
 		#remove 'date' & 'disk'
-		$tagsRef->{date} = '';
-		$tagsRef->{disk} = '';
+		unless ( $songFile =~ m#\.m4a$#i ) {
+			$tagsRef->{date} = '';
+			$tagsRef->{disk} = '';
+		}
 	}
 }
 
-#----------------------------------------------------------------------------------------------------------
-# extract metadata from song file path, when song file does not have complete metadata (calls 'ffprobe' 
-#   command-line utility when 'length' is not present)
+#---------------------------------------------------------------------------------------------------
+# extract metadata from song file path, when song file does not have complete metadata (calls 
+#   'ffprobe' command-line utility when 'length' is not present)
 # **args:
 #     1 - number of current song file
 #     2 - tags hash reference
 #     3 - song file to be run on
 sub extractTags
-#----------------------------------------------------------------------------------------------------------
+#---------------------------------------------------------------------------------------------------
 {
 	my ( $num, $tagsRef, $songFile ) = @_;
 
@@ -2132,7 +2201,7 @@ sub extractTags
 		my $album = $2;
 		#add escape '\' to square brackets for match expression
 		my $albumMatch = $album;
-		$albumMatch =~ s#([\(\)\[\]\*\+])#\$1#g;
+		$albumMatch =~ s#([\(\)\[\]\*\+\?])#\$1#g;
 		$tagsRef->{artist} = $artist if ( ! $tagsRef->{artist} );
 		#determine if directory is actually a compilation with 'Disc' folders
 		if ( ( $artist =~ m#^$albumMatch$#i ) || ( $album =~ m#^dis[ck]\s*\d+$#i ) ) {
@@ -2213,9 +2282,9 @@ sub extractTags
 	}
 }
 
-#----------------------------------------------------------------------------------------------------------
-# write metadata to song file & builds song file node for writing to XML playlist, calls 'ffmpeg' command-
-#   line utility
+#---------------------------------------------------------------------------------------------------
+# write metadata to song file & builds song file node for writing to XML playlist, calls 'ffmpeg' 
+#   command-line utility
 # **args:
 #     1 - number of current song file
 #     2 - $writer object used to write out XML nodes to XML playlist
@@ -2223,7 +2292,7 @@ sub extractTags
 #     4 - song file to be run on
 #     5 - $songNode object for current song node
 sub writeTags
-#----------------------------------------------------------------------------------------------------------
+#---------------------------------------------------------------------------------------------------
 {
 	my ( $num, $writer, $tagsRef, $songFile, $songNode ) = @_;
 
@@ -2297,8 +2366,7 @@ sub writeTags
 	my ( $songFileName, $songFileDir ) = fileparse( abspathL ( $songFile ) );
 	my $tmpSongFileName = $songFileName;
 	if ( $tmpSongFileName =~ s#(.)\.(\w\w\w\w?)$#$1_tmp\.$2#i ) {
-		#verifying file is not left open by other process
-		renameL ( $songFileDir . $songFileName, $songFileDir . $tmpSongFileName ) or badExit( $subName, "Not able to rename song file: '" . $songFileDir . $songFileName . "' to temp file: '" . $songFileDir . $tmpSongFileName . "'" );
+		copyL ( $songFileDir . $songFileName, $songFileDir . $tmpSongFileName ) or badExit( $subName, "Not able to copy song file: '" . $songFileDir . $songFileName . "' to temp file: '" . $songFileDir . $tmpSongFileName . "'" );
 	}
 
 	#create array of metadata tag args to add in ffmpeg (will splice into command args array)
@@ -2310,31 +2378,6 @@ sub writeTags
 		#use Unicode curved double quote in key
 		$key =~ s#"#\N{U+201D}#g;
 		$metaKey = $key;
-		#use 'part' & 'sort_with' when .mkv song file type
-		if ( $songFileName =~ m#\.mkv$#i ) {
-			if ( ( $key =~ m#^track$#i ) && ( $tagsRef->{part} ) ) {
-				$tagsRef->{$key} = $tagsRef->{part};
-			} elsif ( ( $key =~ m#^titlesortorder$#i ) && ( $tagsRef->{sort_with} ) ) {
-				$tagsRef->{$key} = $tagsRef->{sort_with};
-			} elsif ( ( $key =~ m#^titlesort$#i ) && ( $tagsRef->{sort_with} ) ) {
-				#only set if preferred value not set
-				if ( ! $tagsRef->{titlesortorder} ) {
-					$tagsRef->{$key} = $tagsRef->{sort_with};
-				}
-			}
-		}
-		#set 'disk', 'album_artist', & 'createdate' when .m4a song file type
-		if ( $songFileName =~ m#\.m4a$#i ) {
-			#key for 'year' may also be: '©day'
-			if ( ( $key =~ m#^discnumber$#i ) && ( ! $tagsRef->{$key} ) && ( $tagsRef->{disk} ) ) {
-				$tagsRef->{$key} = $tagsRef->{disk};
-			} elsif ( ( $key =~ m#^albumartist$#i ) && ( ! $tagsRef->{$key} ) && ( $tagsRef->{album_artist} ) ) {
-				$tagsRef->{$key} = $tagsRef->{album_artist};
-			} elsif ( ( $key =~ m#^createdate$#i ) && ( $tagsRef->{$key} =~ m#^\d\d\d\d$# ) ) {
-				#set year value with special format required
-				$tagsRef->{$key} .= ':01:01 00:00:00';
-			}
-		}
 		#replace any values that contain newlines
 		$tagsRef->{$key} =~ s#\r?\n#,#g;
 		if ( ! $tagsRef->{$key} ) {
@@ -2398,18 +2441,19 @@ sub writeTags
 	if ( $? || $stdErr || ( ! testL ( 's', $songFileDir . $songFileName ) ) ) {
 		badExit( $subName, "Not able to run 'ffmpeg' for song: '" . $songFileName . "', returned:\n" . $stdErr );
 	}
+
 	#removing temp song file & 'ffmpeg' batch file
 	deleteFile( $songFileDir . $tmpSongFileName, $subName, 'song' );
 	deleteFile( $ffmpegBat, $subName, "'ffmpeg' batch" );
 }
 
-#----------------------------------------------------------------------------------------------------------
+#---------------------------------------------------------------------------------------------------
 # output & log warning process
 # **args:
 #     1 - function name of calling subroutine (opt) [use 'undef' if global]
 #     2 - warning message
 sub warning
-#----------------------------------------------------------------------------------------------------------
+#---------------------------------------------------------------------------------------------------
 {
 	my ( $funcName, $msg ) = @_;
 
@@ -2445,13 +2489,13 @@ sub warning
 	promptUser( 'warning', $msg );
 }
 
-#----------------------------------------------------------------------------------------------------------
+#---------------------------------------------------------------------------------------------------
 # output & log failed execution process
 # **args:
 #     1 - function name of calling subroutine (opt) [use 'undef' if global]
 #     2 - error message
 sub badExit
-#----------------------------------------------------------------------------------------------------------
+#---------------------------------------------------------------------------------------------------
 {
 	my ( $funcName, $error ) = @_;
 
@@ -2501,12 +2545,12 @@ sub badExit
 	exit( 255 );
 }
 
-#----------------------------------------------------------------------------------------------------------
+#---------------------------------------------------------------------------------------------------
 # function ends successfully - log closed and window refreshed for restart
 # **args:
 #     1 - function name of calling subroutine (opt) [use 'undef' if global]
 sub tkEnd
-#----------------------------------------------------------------------------------------------------------
+#---------------------------------------------------------------------------------------------------
 {
 	my ( $funcName ) = @_;
 
@@ -2556,10 +2600,10 @@ sub tkEnd
 	$M->{'window'}->update();
 }
 
-#----------------------------------------------------------------------------------------------------------
+#---------------------------------------------------------------------------------------------------
 # GUI program exit & write out selections from GUI for next run use
 sub tkExit
-#----------------------------------------------------------------------------------------------------------
+#---------------------------------------------------------------------------------------------------
 {
 	#call to save current file/directory selection
 	saveLastVal();
@@ -2571,10 +2615,10 @@ sub tkExit
 	exit( 0 );
 }
 
-#----------------------------------------------------------------------------------------------------------
+#---------------------------------------------------------------------------------------------------
 # save current file/directory selection for next use
 sub saveLastVal
-#----------------------------------------------------------------------------------------------------------
+#---------------------------------------------------------------------------------------------------
 {
 	my ( $dirOS_Err, $dirSysErr, $lastFH );
 
@@ -2598,10 +2642,10 @@ sub saveLastVal
 	close( $lastFH );
 }
 
-#----------------------------------------------------------------------------------------------------------
+#---------------------------------------------------------------------------------------------------
 # read previous run file/directory selection for current use
 sub readLastVal
-#----------------------------------------------------------------------------------------------------------
+#---------------------------------------------------------------------------------------------------
 {
 	my @lastVal;
 
@@ -2631,12 +2675,12 @@ sub readLastVal
 	}
 }
 
-#----------------------------------------------------------------------------------------------------------
+#---------------------------------------------------------------------------------------------------
 # start logging (if subroutine name passed log will be for subroutine, otherwise log will be global)
 # **args:
 #     1 - function name of calling subroutine (opt) [use 'undef' if global]
 sub startLog
-#----------------------------------------------------------------------------------------------------------
+#---------------------------------------------------------------------------------------------------
 {
   my ( $funcName ) = @_;
 
@@ -2655,7 +2699,7 @@ sub startLog
 		open( STDERR, '>>:encoding(UTF-8)', $log ) or warning( undef, 'Not able to redirect STDERR' );
 		my $oldfh = select $funcLogFH; $| = 1; select $oldfh;
 
-		toLog( $funcName, "$Sep\nFunction: $funcName\n\tDate: $timeSt\n$Sep" );
+		toLog( $funcName, "$Sep\nFunction: $funcName\n\tDate: $timeSt\n$Sep\n" );
 	} else {
     if ( testL ( 'd', $dirPath ) ) {
 	    $log = $dirPath . $progName . '.log';
@@ -2677,18 +2721,18 @@ sub startLog
 			open( STDERR, '>>:encoding(UTF-8)', $log ) or warning( undef, 'Not able to redirect STDERR' );
 		}
 
-		toLog( undef, "$SEP\nTool: $progName\n\tVersion: $Version\n\n\tDate: $timeSt\n$Sep" );
+		toLog( undef, "$SEP\nTool: $progName\n\tVersion: $Version\n\n\tDate: $timeSt\n$Sep\n" );
 		toLog( undef, "$progName Process Started\n$Sep\n" );
 	}
 }
 
-#----------------------------------------------------------------------------------------------------------
+#---------------------------------------------------------------------------------------------------
 # add to log (if subroutine name passed log will be for subroutine, otherwise log will be global)
 # **args:
 #     1 - function name of calling subroutine (opt) [use 'undef' if global]
 #     2 - log message
 sub toLog
-#----------------------------------------------------------------------------------------------------------
+#---------------------------------------------------------------------------------------------------
 {
 	my ( $funcName, $msg ) = @_;
 	my ( $package, $file, $line, $subname ) = caller( 1 );
@@ -2715,12 +2759,12 @@ sub toLog
 	}
 }
 
-#----------------------------------------------------------------------------------------------------------
+#---------------------------------------------------------------------------------------------------
 # end logging (if subroutine name passed log will be for subroutine, otherwise log will be global)
 # **args:
 #     1 - function name of calling subroutine (opt) [use 'undef' if global]
 sub endLog
-#----------------------------------------------------------------------------------------------------------
+#---------------------------------------------------------------------------------------------------
 {
   my ( $funcName ) = @_;
 
@@ -2739,7 +2783,7 @@ sub endLog
 		if ( $warn{global} ) {
 			toLog( undef, "\n   **(" . $warn{global} . ") Warnings were detected**\n\n" );
 		}
-    toLog( undef, "$SEP\nTool: $progName\n\tVersion: $Version\n\n\tDate: $timeSt\n$Sep" );
+    toLog( undef, "$SEP\nTool: $progName\n\tVersion: $Version\n\n\tDate: $timeSt\n$Sep\n" );
 		toLog( undef, "$progName Process Completed\n$SEP\n\n" );
 		close $logFH;
 	}
