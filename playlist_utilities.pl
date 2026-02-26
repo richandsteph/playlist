@@ -116,7 +116,7 @@
 #                                removed defined() in tests where checking for non-empty value / 
 #                                added some value tests when checking for existance of tag value / 
 #                                added rules for checking 'part', 'disk', & 'createdate'
-#        1.11 - 19 Feb 2026  RAD remove iTunes comments / reorder buttons in GUI / moved badExit() 
+#        1.11 - 23 Feb 2026  RAD remove iTunes comments / reorder buttons in GUI / moved badExit() 
 #                                to after sleep() after renameL() in writeTags() / add "?" to 
 #                                escape pattern in matches in renumber() & extractTags() / changed 
 #                                button text in GUI / replaced 'createdate' with 'date' for .m4a 
@@ -125,14 +125,22 @@
 #                                writeTags() to cleanTags() for better organization / replacing 
 #                                renameL() with copyL() when creating '_tmp' temporary song file in 
 #                                writeTags()
+#        1.12 - 23 Feb 2026  RAD corrected date from v1.11 comment header / replaced '' with "" for 
+#                                filenames in logging messages / increased/decreased button widths 
+#                                to account for in process message width on buttons / removed JSON 
+#                                pragma / created loadTags() to modularize looping through array of 
+#                                tag names & assigning values based on priority - lowest is 
+#                                priority / removed loop through array @listOfTagArrays in 
+#                                cleanTags() / set 'File' selection in GUI to empty when choosing 
+#                                'Directory'
 #
 #
 #   TO-DO:
-#         1) Finish testing of copyL(), replacing renameL()
+#         1) None
 #
 #***************************************************************************************************
 
-my $Version = '1.11';
+my $Version = '1.12';
 
 use strict;
 use warnings;
@@ -149,7 +157,6 @@ use File::Basename qw( fileparse );
 BEGIN { $Image::ExifTool::configFile = 'C:\Users\rich\.ExifTool_config' }
 use Image::ExifTool qw( :Public );
 use IPC::Run3;
-use JSON;
 use Tk;
 use Tk::DialogBox;
 use XML::LibXML;
@@ -157,8 +164,7 @@ use XML::Writer;
 use Win32;
 use Win32::LongPath qw( abspathL chdirL copyL getcwdL mkdirL openL renameL testL unlinkL );
 
-#Tk setup
-#colors from rgb.txt
+#Tk setup - colors from 'rgb.txt'
 use constant TK_COLOR_BG			=> 'SlateGray1';
 use constant TK_COLOR_FIELD		=> 'AliceBlue';
 use constant TK_COLOR_FG			=> 'black';
@@ -370,9 +376,9 @@ sub deleteFile
 
 	if ( testL ( 'e', $file ) ) {
 		my $fileDel = unlinkL ( $file );
-		warning( $subName, "Not able to remove temporary " . $desc . " file: '" . $file . "'" ) if ( ! $fileDel );
+		warning( $subName, "Not able to remove temporary " . $desc . " file: \"" . $file . "\"" ) if ( ! $fileDel );
 	} else {
-		badExit( $subName, "No " . $desc . " file to delete: '" . $file . "'" );
+		badExit( $subName, "No " . $desc . " file to delete: \"" . $file . "\"" );
 	}
 
 	return;
@@ -392,8 +398,8 @@ sub createFile
 	my $fileFH;
 
 	#open/close file with commands written to it
-	toLog( $subName, "   - Creating " . $desc . " file: '" . $file . "'\n" );
-	openL ( \$fileFH, '>:encoding(UTF-8)', $file ) or badExit( $subName, "Not able to create $desc file: '" . $file . "'" );
+	toLog( $subName, "   - Creating " . $desc . " file: \"" . $file . "\"\n" );
+	openL ( \$fileFH, '>:encoding(UTF-8)', $file ) or badExit( $subName, "Not able to create $desc file: \"" . $file . "\"" );
 	my $newFH = select $fileFH; $| = 1; select $newFH;
 	print $fileFH $content;
 	close( $fileFH );
@@ -412,17 +418,52 @@ sub loadXml
 	my ( $file, $subName ) = @_;
 	my ( $dom, $xmlFH );
 
-	toLog( $subName, "   - Loading XML: '" . $file . "' into DOM\n" );
-	openL ( \$xmlFH, '<:encoding(UTF-8)', $file ) or badExit( $subName, "Not able to open XML file: '" . $file . "'" );
+	toLog( $subName, "   - Loading XML: \"" . $file . "\" into DOM\n" );
+	openL ( \$xmlFH, '<:encoding(UTF-8)', $file ) or badExit( $subName, "Not able to open XML file: \"" . $file . "\"" );
 	binmode $xmlFH;
 	$dom = XML::LibXML->load_xml( IO => $xmlFH );
 	if ( ! $dom ) {
-		badExit( $subName, "Couldn't load XML file: '" . $file . "'" );
+		badExit( $subName, "Couldn't load XML file: \"" . $file . "\"" );
 	} else {
 		close( $xmlFH );
 	}
 
 	return( $dom );
+}
+
+#---------------------------------------------------------------------------------------------------
+# load tag values from @listOfTagArrays, reversing after setting initial primary value to set 
+#   primary based on @listOfTagArrays position for each row (priority is the lowest key)
+# **args:
+#     1 - tags hash reference
+sub loadTags
+#---------------------------------------------------------------------------------------------------
+{
+	my ( $tagsRef ) = @_;
+
+	#loop through array of arrays for possible tags to set tag's value, according to priority of array
+	for my $tagsRow ( 0 .. $#listOfTagArrays ) {
+		my $tagsRowRef = $listOfTagArrays[$tagsRow];
+		#loop through inner array in reverse for each tag name, so priority is last (lowest array item) value set
+		my $primaryTagName = $listOfTagArrays[$tagsRow][0];
+		my $primaryTagValue;
+		#save initial base value, or higher if lower not available
+		for my $tagsCol ( 0 .. $#{$listOfTagArrays[0]} ) {
+			my $tagName = $listOfTagArrays[$tagsRow][$tagsCol];
+			$primaryTagValue = $tagsRef->{$tagName} unless ( $primaryTagValue );
+		}
+		for ( my $tagsCol = $#{$tagsRowRef}; $tagsCol >= 0; $tagsCol-- ) {
+			my $tagName = $listOfTagArrays[$tagsRow][$tagsCol];
+			$tagsRef->{$primaryTagName} = $tagsRef->{$tagName} if ( $tagsRef->{$tagName} );
+		}
+		#reset base value to starting value, before setting all others
+		$tagsRef->{$primaryTagName} = $primaryTagValue if ( $primaryTagValue );
+		for my $tagsCol ( 0 .. $#{$tagsRowRef} ) {
+			my $tagName = $listOfTagArrays[$tagsRow][$tagsCol];
+			#only set when original had a value
+			$tagsRef->{$tagName} = $tagsRef->{$primaryTagName} if ( exists $tagsRef->{$tagName} );
+		}
+	}
 }
 
 #---------------------------------------------------------------------------------------------------
@@ -440,7 +481,7 @@ sub getXML_List
 	updStatus( 'Building list of XML files' );
 
 	my $dir = Win32::LongPath->new();
-	$dir->opendirL ( $dirPath ) or badExit( $subName, "Not able to open directory: '" . $dirPath . "'" );
+	$dir->opendirL ( $dirPath ) or badExit( $subName, "Not able to open directory: \"" . $dirPath . "\"" );
 
 	@xmlList = grep m/\.xml$/i, $dir->readdirL();
 	$dir->closedirL();
@@ -451,7 +492,7 @@ sub getXML_List
 		push @newList, $dirPath . $file;
 	}
 
-	badExit( $subName, "No files were found in directory: '" . $dirPath . "'" ) unless ( scalar( @newList ) );
+	badExit( $subName, "No files were found in directory: \"" . $dirPath . "\"" ) unless ( scalar( @newList ) );
 
 	return( @newList );
 }
@@ -476,7 +517,7 @@ sub getSongList
 	updStatus( 'Building list of song files' );
 
 	my $dir = Win32::LongPath->new();
-	$dir->opendirL ( $workingDir ) or badExit( $subName, "Not able to open directory: '" . $workingDir . "'" );
+	$dir->opendirL ( $workingDir ) or badExit( $subName, "Not able to open directory: \"" . $workingDir . "\"" );
 
 	foreach my $dirItem ( $dir->readdirL() ) {
 		next if $dirItem =~ m#^\.{1,2}$#;
@@ -668,7 +709,7 @@ sub tkMainWindow
 		-fg									=> TK_COLOR_FG,
 		-activebackground		=> TK_COLOR_LGREEN,
 		-disabledforeground => TK_COLOR_GREYBUT,
-		-width							=> '11'
+		-width							=> '12'
 	)->pack(
 		-side								=> 'left',
 		-padx								=> '2',
@@ -683,7 +724,7 @@ sub tkMainWindow
 		-fg									=> TK_COLOR_FG,
 		-activebackground		=> TK_COLOR_TURQ,
 		-disabledforeground => TK_COLOR_GREYBUT,
-		-width							=> '11'
+		-width							=> '12'
 	)->pack(
 		-side								=> 'left',
 		-padx								=> '2',
@@ -697,7 +738,7 @@ sub tkMainWindow
 		-bg								=> TK_COLOR_BG,
 		-fg								=> TK_COLOR_FG,
 		-activebackground => TK_COLOR_LRED,
-		-width						=> '8'
+		-width						=> '6'
 	)->pack(
 		-padx							=> '2',
 		-pady							=> '8'
@@ -822,6 +863,7 @@ sub tkGetDir
 
 	if ( $getDirPath ) {
 		$getDirPath =~ s#[\/\\]#$FS#g;
+		$fileFQN = '';
 		if ( $getDirPath !~ m#[\/\\]$# ) {
 			$getDirPath = $getDirPath . $FS;
 		}
@@ -840,6 +882,7 @@ sub tkGetDir
 		if ( $dirPath !~ m#[\/\\]$# ) {
 			$dirPath = $dirPath . $FS;
 		}
+		$fileFQN = '';
 	}
 }
 
@@ -952,9 +995,9 @@ sub make_XML_playlist
 	$M->{'exit'}->focus();
 
 	#starting log process
-	toLog( undef, "  Creating XML Playlist...\n    See '" . $dirPath . $subName . ".log' for details\n\n" );
+	toLog( undef, "  Creating XML Playlist...\n    See \"" . $dirPath . $subName . ".log\" for details\n\n" );
 	startLog( $subName );
-	toLog( $subName, "Creating XML Playlist from directory: '" . $dirPath . "'\n" );
+	toLog( $subName, "Creating XML Playlist from directory: \"" . $dirPath . "\"\n" );
 
 	toLog( $subName, " - Scouring Music folders to build list of song files...\n" );
 	my @songList;
@@ -993,7 +1036,7 @@ sub make_XML_playlist
 	my ( $rawStdErr, $stdErr );
 	run3( $statBat, \undef, \undef, \$rawStdErr );
 	$stdErr = decode( $Config{enc_to_system} || 'UTF-8', $rawStdErr );
-	badExit( $subName, "Not able to run set console code page batch file wrapper: '" . $statBat . "', returned:\n" . $stdErr ) if ( $? || $stdErr );
+	badExit( $subName, "Not able to run set console code page batch file wrapper: \"" . $statBat . "\", returned:\n" . $stdErr ) if ( $? || $stdErr );
 	
 	#clean up temporary file
 	deleteFile( $statBat, $subName, 'console code page batch' );
@@ -1008,11 +1051,11 @@ sub make_XML_playlist
 		#echo status to console
 		my $songFileName;
 		( $songFileName ) = fileparse( abspathL ( $songFile ) );
-		toLog( $subName, 'Processing song no. ' . $num . ": '" . $songFile . "'\n" );
+		toLog( $subName, 'Processing song no. ' . $num . ": \"" . $songFile . "\"\n" );
 		updStatus( 'Processing song no. ' . $num );
 		binmode( STDOUT, ":encoding(UTF-8)" );
 		print "\n" if ( $num == 1 );
-		print '   - processing song no. ' . $num . ": '" . $songFileName . "'\n";
+		print '   - processing song no. ' . $num . ": \"" . $songFileName . "\"\n";
 	
 		#set per song hash for tag metadata
 		my %tags;
@@ -1118,13 +1161,13 @@ sub make_XML_playlist
 	my $xmlPlaylistFile = $dirPath . $playlist_name . '.xml';
 	createFile( $xmlPlaylistFile, $subName, $writer, 'XML playlist' );
 
-	toLog( $subName, "\n...Created XML Playlist: '" . $xmlPlaylistFile . "'\n\n\n" );
+	toLog( $subName, "\n...Created XML Playlist: \"" . $xmlPlaylistFile . "\"\n\n\n" );
 	toLog( $subName, " *WARNING*: There were " . $warn{$subName} . " warning(s) for process...\n\n\n" ) if ( $warn{$subName} );
-	toLog( undef, "  ...Finished Creating XML Playlist from: '" . $dirPath . "'\n\n" );
+	toLog( undef, "  ...Finished Creating XML Playlist from: \"" . $dirPath . "\"\n\n" );
 	#echo status to console
 	my ( $xmlName ) = fileparse( abspathL ( $xmlPlaylistFile ) );
 	binmode( STDOUT, ":encoding(UTF-8)" );
-	print "   Finished Creating XML Playlist '" . $xmlName . "'\n";
+	print "   Finished Creating XML Playlist \"" . $xmlName . "\"\n";
 
 	#process end
 	my $folderNm;
@@ -1193,7 +1236,7 @@ sub make_m3u
 	$M->{'exit'}->focus();
 
 	#starting log process
-	toLog( undef, "  Making .m3u Playlist...\n    See '" . $dirPath . $subName . ".log' for details\n\n" );
+	toLog( undef, "  Making .m3u Playlist...\n    See \"" . $dirPath . $subName . ".log\" for details\n\n" );
 	startLog( $subName );
 	
 	#retrieve list of XML files in $dirPath, unless file is selected - just push single item into array
@@ -1203,7 +1246,7 @@ sub make_m3u
 			push @fileList, $fileFQN;
 		} else {
 			promptUser( 'warning', 'Selected file is not an XML instance' );
-			toLog( $subName, "File selected is not an XML instance, ending '" . $subName . "' function\n\n" );
+			toLog( $subName, "File selected is not an XML instance, ending \"" . $subName . "\" function\n\n" );
 			tkEnd( $subName );
 			return;
 		}
@@ -1215,10 +1258,10 @@ sub make_m3u
 	my $m3uFileName;
 	foreach my $xmlFile ( @fileList ) {
 		toLog( $subName, "...Making .m3u playlist from XML: '$xmlFile'\n\n" );
-		updStatus( "Making .m3u from XML: '" . $xmlFile . "'" );
+		updStatus( "Making .m3u from XML: \"" . $xmlFile . "\"" );
 		#echo status to console
 		binmode( STDOUT, ":encoding(UTF-8)" );
-		print "\n   Making .m3u for: '" . $xmlFile . "'\n";
+		print "\n   Making .m3u for: \"" . $xmlFile . "\"\n";
 
 		#load XML data
 		my $dom = loadXml( $xmlFile, $subName );
@@ -1233,7 +1276,7 @@ sub make_m3u
 			$m3uFileName =~ s#\.\w\w\w?$##;
 		}
 		$m3uData .= "$m3uFileName\n";
-		updStatus( "Creating .m3u playlist: '" . $m3uFileName . "'" );
+		updStatus( "Creating .m3u playlist: \"" . $m3uFileName . "\"" );
 
 		toLog( $subName, "Setting date/time for playlist\n" );
 		my $now = dateTime();
@@ -1255,7 +1298,7 @@ sub make_m3u
 			$m3uNum{$path} = ( $songNode->findvalue( './@number' ) );
 			
 			#exit if no .m3u data found
-			badExit( $subName, "No .m3u entry made, missing (at least) 1 of path: '" . $path . "', title: '" . $title . "', artist: '" . $artist . "', length: '" . $length . "'" ) unless ( $length && $title && $artist && $path );
+			badExit( $subName, "No .m3u entry made, missing (at least) 1 of path: \"" . $path . "\", title: '" . $title . "', artist: '" . $artist . "', length: '" . $length . "'" ) unless ( $length && $title && $artist && $path );
 			#add to m3u hash keyed by path
 			$m3uItem{$path} = '#EXTINF:' . $length . ',' . $title . ' - ' . $artist . "\n" . $path . "\n";
 			$m3uTitle{$path} = $title;
@@ -1272,13 +1315,13 @@ sub make_m3u
 		$m3uFilePath = $dirPath . $m3uFile;
 		createFile( $m3uFilePath, $subName, $m3uData, '.m3u' );
 
-		toLog( $subName, "\n...Made .m3u Playlist: '" . $m3uFilePath . "'\n\n\n" );
-		toLog( $subName, " *WARNING*: There were " . $warn{make_m3u} . " warning(s) for process...\n\n\n" ) if ( $warn{make_m3u} );
-		toLog( undef, "  ...Finished Making .m3u Playlist from: '" . $xmlFile . "'\n\n" );
+		toLog( $subName, "\n...Made .m3u Playlist: \"" . $m3uFilePath . "\"\n\n\n" );
+		toLog( $subName, " *WARNING*: There were " . $warn{$subName} . " warning(s) for process...\n\n\n" ) if ( $warn{$subName} );
+		toLog( undef, "  ...Finished Making .m3u Playlist from: \"" . $xmlFile . "\"\n\n" );
 		#echo status to console
 		my ( $xmlName ) = fileparse( abspathL ( $xmlFile ) );
 		binmode( STDOUT, ":encoding(UTF-8)" );
-		print "   Finished Making .m3u Playlist '" . $m3uFile . "'\n";
+		print "   Finished Making .m3u Playlist \"" . $m3uFile . "\"\n";
 	}
 	
 	#process end
@@ -1351,9 +1394,9 @@ sub renumber
 	$M->{'exit'}->focus();
 
 	#starting log process
-	toLog( undef, "  Renumbering...\n    See '" . $dirPath . $subName . ".log' for details\n\n" );
+	toLog( undef, "  Renumbering...\n    See \"" . $dirPath . $subName . ".log\" for details\n\n" );
 	startLog( $subName );
-	updStatus( "Renumbering XML files in '" . $dirPath . "'" );
+	updStatus( "Renumbering XML files in \"" . $dirPath . "\"" );
 	
 	#retrieve list of XML files in $dirPath, unless file is selected - just push single item into array
 	my @fileList;
@@ -1372,11 +1415,11 @@ sub renumber
 
 	#loop through each XML file in directory
 	foreach my $xmlFile ( @fileList ) {
-		toLog( $subName, "...Renumbering XML File: '$xmlFile'\n\n" );
-		updStatus( "Renumbering XML file: '" . $xmlFile . "'" );
+		toLog( $subName, "...Renumbering XML File: \"" . $xmlFile . "\"\n\n" );
+		updStatus( "Renumbering XML file: \"" . $xmlFile . "\"" );
 		#echo status to console
 		binmode( STDOUT, ":encoding(UTF-8)" );
-		print "\n   Renumbering '" . $xmlFile . "'\n";
+		print "\n   Renumbering \"" . $xmlFile . "\"\n";
 	
 		#load XML data
 		my $dom = loadXml( $xmlFile, $subName );
@@ -1430,7 +1473,7 @@ sub renumber
 					foreach my $val ( values( %title ) ) {
 						$titleContent =~ s#([\(\)\[\]\*\+\?])#\$1#g;
 						if ( $val =~ m#^$titleContent$#i ) {
-							toLog( $subName, "\tNOTE: The content '" . $titleContent . "' in <title> of <song> no. " . $nodeCnt . " is duplicated\n" );
+							toLog( $subName, "\tNOTE: The content \"" . $titleContent . "\" in <title> of <song> no. " . $nodeCnt . " is duplicated\n" );
 						}
 					}
 					#store current <title> content in hash for checking against other nodes
@@ -1471,13 +1514,13 @@ sub renumber
 		#write out renumbered XML playlist file
 		createFile( $xmlFile, $subName, $writer, 'XML playlist' );
 
-		toLog( $subName, "\n...Finished Renumbering XML file: '" . $xmlFile . "'\n\n\n" );
-		toLog( $subName, " *WARNING*: There were " . $warn{renumber} . " warning(s) for process...\n\n\n" ) if ( $warn{renumber} );
-		toLog( undef, "  ...Finished Renumbering XML file: '" . $xmlFile . "'\n\n" );
+		toLog( $subName, "\n...Finished Renumbering XML file: \"" . $xmlFile . "\"\n\n\n" );
+		toLog( $subName, " *WARNING*: There were " . $warn{$subName} . " warning(s) for process...\n\n\n" ) if ( $warn{$subName} );
+		toLog( undef, "  ...Finished Renumbering XML file: \"" . $xmlFile . "\"\n\n" );
 		#echo status to console
 		my ( $xmlName ) = fileparse( abspathL ( $xmlFile ) );
 		binmode( STDOUT, ":encoding(UTF-8)" );
-		print "   Finished Renumbering '" . $xmlName . "'\n";
+		print "   Finished Renumbering \"" . $xmlName . "\"\n";
 	}
 
 	#process end
@@ -1549,17 +1592,17 @@ sub update_ID3_tags
 	$M->{'exit'}->focus();
 
 	#starting log process
-	toLog( undef, "  Updating ID3 Tags:\n    See '" . $dirPath . $subName . ".log' for details\n\n" );
+	toLog( undef, "  Updating ID3 Tags:\n    See \"" . $dirPath . $subName . ".log\" for details\n\n" );
 	startLog( $subName );
-	updStatus( "Updating ID3 tags in '" . $dirPath . "'" );
+	updStatus( "Updating ID3 tags in \"" . $dirPath . "\"" );
 	
 	#separate out playlist XML filename and directory
 	my ( $playlistFilename, $playlistFilePath ) = fileparse( abspathL ( $fileFQN ) );
 	$playlistFilename =~ s#\.\w\w\w?$##;
-	toLog( $subName, "Updating ID3 Tags in XML playlist file: '" . $playlistFilename . ".xml'...\n" );
+	toLog( $subName, "Updating ID3 Tags in XML playlist file: \"" . $playlistFilename . ".xml\"...\n" );
 	#echo status to console
 	binmode( STDOUT, ":encoding(UTF-8)" );
-	print "\n   Updating ID3 Tags in: '" . $playlistFilename . ".xml'\n";
+	print "\n   Updating ID3 Tags in: \"" . $playlistFilename . ".xml\"\n";
 	
 	#load playlist XML
 	my $dom = loadXml( $fileFQN, $subName );
@@ -1608,13 +1651,13 @@ sub update_ID3_tags
 				$pathContent = $nodeContent if ( $nodeContent );
 				( $songFileName ) = fileparse( abspathL ( $pathContent ) );
 				if ( testL ( 'e', $pathContent ) ) {
-					toLog( $subName, '...Processing song no. ' . $num . ": '" . $pathContent . "'\n" );
+					toLog( $subName, '...Processing song no. ' . $num . ": \"" . $pathContent . "\"\n" );
 					binmode( STDOUT, ":encoding(UTF-8)" );
-					print '     - processing song no. ' . $num . ": '" . $songFileName . "'\n";
+					print '     - processing song no. ' . $num . ": \"" . $songFileName . "\"\n";
 				} else {
 					binmode( STDOUT, ":encoding(UTF-8)" );
-					print '    Song no. ' . $num . " : '" . $songFileName . "' does not exist\n";
-					warning( $subName, 'Song no. ' . $num . " : '" . $pathContent . "' does not exist" );
+					print '    Song no. ' . $num . " : \"" . $songFileName . "\" does not exist\n";
+					warning( $subName, 'Song no. ' . $num . " : \"" . $pathContent . "\" does not exist" );
 					tkEnd( $subName );
 					return();
 				}
@@ -1663,15 +1706,15 @@ sub update_ID3_tags
 	#write out new playlist XML
 	createFile( $fileFQN, $subName, $writer, 'XML playlist' );
 
-	toLog( $subName, "\n...Created Updated XML Playlist file: '" . $fileFQN . "'\n\n\n" );
-	toLog( $subName, ' *WARNING*: There were ' . $warn{update_ID3_tags} . " warning(s) for process...\n\n\n" ) if ( $warn{update_ID3_tags} );
-	toLog( undef, "  ...Finished Updating ID3 Tags in: '" . $dirPath . "'\n\n" );
+	toLog( $subName, "\n...Created Updated XML Playlist file: \"" . $fileFQN . "\"\n\n\n" );
+	toLog( $subName, ' *WARNING*: There were ' . $warn{$subName} . " warning(s) for process...\n\n\n" ) if ( $warn{$subName} );
+	toLog( undef, "  ...Finished Updating ID3 Tags in: \"" . $dirPath . "\"\n\n" );
 	#echo status to console
 	binmode( STDOUT, ":encoding(UTF-8)" );
-	print "   Finished Updating ID3 Tags in '" . $fileName . "'\n";
+	print "   Finished Updating ID3 Tags in \"" . $fileName . "\"\n";
 
 	#process end
-	updStatus( "Finished Updating ID3 Tags in '" . $fileName . "'" );
+	updStatus( "Finished Updating ID3 Tags in \"" . $fileName . "\"" );
 	tkEnd( $subName );
 }
 
@@ -1729,29 +1772,8 @@ sub mkvTools
 			}
 		}
 	}
-	#loop through array of arrays for possible tags to set tag's value, according to priority of array
-	for my $tagsRow ( 0 .. $#listOfTagArrays ) {
-		my $tagsRowRef = $listOfTagArrays[$tagsRow];
-		#loop through inner array in reverse for each tag name, so priority is last (lowest array item) value set
-		my $primaryTagName = $listOfTagArrays[$tagsRow][0];
-		my $primaryTagValue;
-		#save initial base value
-		for my $tagsCol ( 0 .. $#{$listOfTagArrays[0]} ) {
-			my $tagName = $listOfTagArrays[$tagsRow][$tagsCol];
-			$primaryTagValue = $tagsRef->{$tagName} unless ( $primaryTagValue );
-		}
-		for ( my $tagsCol = $#{$tagsRowRef}; $tagsCol >= 0; $tagsCol-- ) {
-			my $tagName = $listOfTagArrays[$tagsRow][$tagsCol];
-			$tagsRef->{$primaryTagName} = $tagsRef->{$tagName} if ( $tagsRef->{$tagName} );
-		}
-		#reset base value to starting value, before setting all others
-		$tagsRef->{$primaryTagName} = $primaryTagValue if ( $primaryTagValue );
-		for my $tagsCol ( 0 .. $#{$tagsRowRef} ) {
-			my $tagName = $listOfTagArrays[$tagsRow][$tagsCol];
-			#only set when original had a value
-			$tagsRef->{$tagName} = $tagsRef->{$primaryTagName} if ( exists $tagsRef->{$tagName} );
-		}
-	}
+	#call loop through array of values, based on priority in @listOfTagArrays position
+	loadTags( $tagsRef );
 
 	deleteFile( $mkvBat, $subName, "'mkvextract'" );
 	deleteFile( $songFileXml, $subName, 'XML data for song' );
@@ -1871,29 +1893,8 @@ sub exifTools
 			}
 		}
 	}
-	#loop through array of arrays for possible tags to set tag's value, according to priority of array
-	for my $tagsRow ( 0 .. $#listOfTagArrays ) {
-		my $tagsRowRef = $listOfTagArrays[$tagsRow];
-		#loop through inner array in reverse for each tag name, so priority is last (lowest array item) value set
-		my $primaryTagName = $listOfTagArrays[$tagsRow][0];
-		my $primaryTagValue;
-		#save initial base value, or higher if lower not available
-		for my $tagsCol ( 0 .. $#{$listOfTagArrays[0]} ) {
-			my $tagName = $listOfTagArrays[$tagsRow][$tagsCol];
-			$primaryTagValue = $tagsRef->{$tagName} unless ( $primaryTagValue );
-		}
-		for ( my $tagsCol = $#{$tagsRowRef}; $tagsCol >= 0; $tagsCol-- ) {
-			my $tagName = $listOfTagArrays[$tagsRow][$tagsCol];
-			$tagsRef->{$primaryTagName} = $tagsRef->{$tagName} if ( $tagsRef->{$tagName} );
-		}
-		#reset base value to starting value, before setting all others
-		$tagsRef->{$primaryTagName} = $primaryTagValue if ( $primaryTagValue );
-		for my $tagsCol ( 0 .. $#{$tagsRowRef} ) {
-			my $tagName = $listOfTagArrays[$tagsRow][$tagsCol];
-			#only set when original is instantiated
-			$tagsRef->{$tagName} = $tagsRef->{$primaryTagName} if ( exists $tagsRef->{$tagName} );
-		}
-	}
+	#call loop through array of values, based on priority in @listOfTagArrays position
+	loadTags( $tagsRef );
 }
 
 #---------------------------------------------------------------------------------------------------
@@ -1910,26 +1911,6 @@ sub cleanTags
 	$subName =~ s#main::##;
 	toLog( $subName, "   - Examining each tag retrieved\n" );
 	updStatus( 'Cleaning up metadata tags' );
-
-	#loop through array of arrays for possible tags to clean/set tag's value
-	for my $tagsRow ( 0 .. $#listOfTagArrays ) {
-		my $innerArrayRef = $listOfTagArrays[$tagsRow];
-		#loop through inner array in reverse for each tag name, so priority is last (lowest array item) value set
-		my $priorityTagName = $listOfTagArrays[$tagsRow][0];
-		#save initial base value
-		my $priorityTagValue = $tagsRef->{$priorityTagName};
-		for ( my $tagsCol = $#{$innerArrayRef}; $tagsCol >= 0; $tagsCol-- ) {
-			my $tagName = $listOfTagArrays[$tagsRow][$tagsCol];
-			$tagsRef->{$priorityTagName} = $tagsRef->{$tagName} if ( $tagsRef->{$tagName} );
-		}
-		#reset base value to starting value, before setting all others
-		$tagsRef->{$priorityTagName} = $priorityTagValue if ( $priorityTagValue );
-		for my $tagsCol ( 0 .. $#{$innerArrayRef} ) {
-			my $tagName = $listOfTagArrays[$tagsRow][$tagsCol];
-			#only set when original is instantiated
-			$tagsRef->{$tagName} = $tagsRef->{$priorityTagName} if ( exists $tagsRef->{$tagName} );
-		}
-	}
 
 	foreach my $key ( keys %{$tagsRef} ) {
 		#use Unicode curved double quote in $tagsRef value
@@ -2192,7 +2173,7 @@ sub extractTags
 	toLog( $subName, "   - <title> or <artist> (and/or other) tags have not been set, attempting to set from filename & path\n" );
 
 	my ( $songFileName, $songFileDir ) = fileparse( abspathL ( $songFile ) );
-	updStatus( "Determining tags in: '" . $songFileName . "'" );
+	updStatus( "Determining tags in: \"" . $songFileName . "\"" );
 
 	#determine values from path of song file, using expected 'Music' directory
 	if ( $songFileDir =~ m#\\Music\\([^\\]+)\\([^\\]+)\\$#i ) {
@@ -2313,7 +2294,7 @@ sub writeTags
 	#add children nodes back in specified order
 	foreach my $nodeName ( @listOfXmlTags ) {
 		if ( ! $songNode->exists( $nodeName ) ) {
-			warning( $subName, "'" . $nodeName . "' does not exist in XML instanace" );
+			warning( $subName, "<" . $nodeName . "> does not exist in XML instanace" );
 		} else {
 			#determine if multiple nodes with same name - warn & don't add to $newSongNode
 			my $nodeCnt = 0;
@@ -2321,7 +2302,7 @@ sub writeTags
 				++$nodeCnt;
 			}
 			if ( $nodeCnt > 1 ) {
-				warning( $subName, "Song node has duplicate tags in song no. " . $numberVal . ": '" . $nodeName . "'" );
+				warning( $subName, "Song node has duplicate tags in song no. " . $numberVal . ": <" . $nodeName . ">" );
 			} else {
 				$newSongNode->addChild( $songNode->findnodes( $nodeName ) );
 			}
@@ -2366,7 +2347,7 @@ sub writeTags
 	my ( $songFileName, $songFileDir ) = fileparse( abspathL ( $songFile ) );
 	my $tmpSongFileName = $songFileName;
 	if ( $tmpSongFileName =~ s#(.)\.(\w\w\w\w?)$#$1_tmp\.$2#i ) {
-		copyL ( $songFileDir . $songFileName, $songFileDir . $tmpSongFileName ) or badExit( $subName, "Not able to copy song file: '" . $songFileDir . $songFileName . "' to temp file: '" . $songFileDir . $tmpSongFileName . "'" );
+		copyL ( $songFileDir . $songFileName, $songFileDir . $tmpSongFileName ) or badExit( $subName, "Not able to copy song file: \"" . $songFileDir . $songFileName . "\" to temp file: \"" . $songFileDir . $tmpSongFileName . "\"" );
 	}
 
 	#create array of metadata tag args to add in ffmpeg (will splice into command args array)
@@ -2424,7 +2405,7 @@ sub writeTags
 	);
 	#splice in array of '-metadata' switches into @ffmpeg args
 	splice( @ffmpegArgs, 11, 0, @newMeta );
-	toLog( $subName, "   - System command to rewrite song metadata with 'ffmpeg': '" . join( ' ', @ffmpegArgs ) . "'\n" );
+	toLog( $subName, "   - System command to rewrite song metadata with 'ffmpeg': \[" . join( ' ', @ffmpegArgs ) . "\]\n" );
 
 	#start process to create batch file with 'ffmpeg' commands
 	my $ffmpegBat = $ENV{TEMP} . $FS . 'ffmpeg-' . $num . '.bat';
@@ -2439,7 +2420,7 @@ sub writeTags
 	#clean error header from 'ffmpeg'
 	$stdErr =~ s#^ffmpeg version.+libswresample[\d\.\s\/]+$##is;
 	if ( $? || $stdErr || ( ! testL ( 's', $songFileDir . $songFileName ) ) ) {
-		badExit( $subName, "Not able to run 'ffmpeg' for song: '" . $songFileName . "', returned:\n" . $stdErr );
+		badExit( $subName, "Not able to run 'ffmpeg' for song: \"" . $songFileName . "\", returned:\n" . $stdErr );
 	}
 
 	#removing temp song file & 'ffmpeg' batch file
@@ -2625,11 +2606,11 @@ sub saveLastVal
 	#create last value directory, if not exists
 	my $lastValDir = $ENV{APPDATA} . $FS . $progName;
 	if ( ! testL ( 'd', $lastValDir ) ) {
-		mkdirL ( $lastValDir ) or warning( undef, "Not able to create 'lastValue.cfg' directory: '" . $lastValDir . "'" );
+		mkdirL ( $lastValDir ) or warning( undef, "Not able to create 'lastValue.cfg' directory: \"" . $lastValDir . "\"" );
 	}
 
 	my $lastFile = $lastValDir . $FS . 'lastValue.cfg';
-	openL ( \$lastFH, '>:encoding(UTF-8)', $lastFile ) or warning( undef, "Not able to open last value file: '" . $lastFile . "'" );
+	openL ( \$lastFH, '>:encoding(UTF-8)', $lastFile ) or warning( undef, "Not able to open last value file: \"" . $lastFile . "\"" );
 	my $lastValFH = select $lastFH; $| = 1; select $lastValFH;
 	if ( $fileFQN && $dirPath ) {
 		print $lastFH $fileFQN . "\n" . $dirPath;
@@ -2654,7 +2635,7 @@ sub readLastVal
 	#only read if value not passed
 	if ( ( testL ( 's', $lastFile ) ) && ( ! $ARGV[0] ) ) {
 		my $lastFH;
-		openL ( \$lastFH, '<:encoding(UTF-8)', $lastFile ) or print "\n\n*WARNING: Not able to open last value config file: '" . $lastFile . "'\n\n";
+		openL ( \$lastFH, '<:encoding(UTF-8)', $lastFile ) or print "\n\n*WARNING: Not able to open last value config file: \"" . $lastFile . "\"\n\n";
 		@lastVal = <$lastFH>;
 		close( $lastFH );
 
@@ -2694,7 +2675,7 @@ sub startLog
 	  	my $dir = getcwdL();
 	    $log = $dir . $FS . $progName . '.log';
 		}
-		openL ( \$funcLogFH, '>:encoding(UTF-8)', $log ) or badExit( $funcName, "Not able to create log file: '" . $log . "'" );
+		openL ( \$funcLogFH, '>:encoding(UTF-8)', $log ) or badExit( $funcName, "Not able to create log file: \"" . $log . "\"" );
 		#redirect STDERR to log file
 		open( STDERR, '>>:encoding(UTF-8)', $log ) or warning( undef, 'Not able to redirect STDERR' );
 		my $oldfh = select $funcLogFH; $| = 1; select $oldfh;
@@ -2713,7 +2694,7 @@ sub startLog
 		if ( ! fileno( $logFH ) ) {
 			my $logSysErr = decode( $Config{enc_to_system} || 'UTF-8', $! );
 			my $logOS_Err = decode( $Config{enc_to_system} || 'UTF-8', $^E );
-			print "\n\n*ERROR: Not able to create log file: '" . $log . "', returned:\n" . $logSysErr . "\nand:\n" . $logOS_Err . "\n\n";
+			print "\n\n*ERROR: Not able to create log file: \"" . $log . "\", returned:\n" . $logSysErr . "\nand:\n" . $logOS_Err . "\n\n";
 			exit( 255 );
 		} else {
 			my $oldfh = select $logFH; $| = 1; select $oldfh;
