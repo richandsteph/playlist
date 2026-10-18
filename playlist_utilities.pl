@@ -133,6 +133,8 @@
 #                                priority / removed loop through array @listOfTagArrays in 
 #                                cleanTags() / set 'File' selection in GUI to empty when choosing 
 #                                'Directory'
+#        1.13 - 18 Oct 2026  RAD in make_m3u(), added check for 'phone_music' folder in hierarchy
+#                                to change path to phone folder construction
 #
 #
 #   TO-DO:
@@ -140,7 +142,7 @@
 #
 #***************************************************************************************************
 
-my $Version = '1.12';
+my $Version = '1.13';
 
 use strict;
 use warnings;
@@ -1299,6 +1301,11 @@ sub make_m3u
 			
 			#exit if no .m3u data found
 			badExit( $subName, "No .m3u entry made, missing (at least) 1 of path: \"" . $path . "\", title: '" . $title . "', artist: '" . $artist . "', length: '" . $length . "'" ) unless ( $length && $title && $artist && $path );
+			#reset directory path for songnode to phone path construction, if phone playlist
+			if ( $dirPath =~ m#phone_music#i ) {
+				$path =~ s#\\\\DavisServer_1\\Movies_Music_Pics\\phone_music\\Music\\#/storage/emulated/0/Music/#i;
+				$path =~ s#\\#/#g;
+			}
 			#add to m3u hash keyed by path
 			$m3uItem{$path} = '#EXTINF:' . $length . ',' . $title . ' - ' . $artist . "\n" . $path . "\n";
 			$m3uTitle{$path} = $title;
