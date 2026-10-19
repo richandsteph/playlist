@@ -135,6 +135,10 @@
 #                                'Directory'
 #        1.13 - 18 Oct 2026  RAD in make_m3u(), added check for 'phone_music' folder in hierarchy
 #                                to change path to phone folder construction
+#        1.14 - 18 Oct 2026  RAD in make_XML_playlist(): added check for 'steph-after-school' 
+#                                in path hierarchy to set playlist name / in make_m3u(): moved 
+#                                setting of playlist number to after path determined, added check 
+#                                for 'steph-after-school' in folder hierarchy to set corrected path 
 #
 #
 #   TO-DO:
@@ -142,7 +146,7 @@
 #
 #***************************************************************************************************
 
-my $Version = '1.13';
+my $Version = '1.14';
 
 use strict;
 use warnings;
@@ -1019,7 +1023,11 @@ sub make_XML_playlist
 	#determine playlist name
 	my $playlist_name;
 	if ( $dirPath =~ m#phone_music#i ) {
-		$playlist_name = 'phone-favorites';
+		if ( $dirPath =~ m#steph-after-school#i ) {
+			$playlist_name = 'steph-after-school';
+		} else {
+			$playlist_name = 'phone-favorites';
+		}
 	} else {
 		$playlist_name = 'rich-all-songs';
 	}
@@ -1297,15 +1305,21 @@ sub make_m3u
 			$title = ( $songNode->findvalue( 'title' ) );
 			$artist = ( $songNode->findvalue( 'artist' ) );
 			$path = ( $songNode->findvalue( 'path' ) );
-			$m3uNum{$path} = ( $songNode->findvalue( './@number' ) );
 			
 			#exit if no .m3u data found
 			badExit( $subName, "No .m3u entry made, missing (at least) 1 of path: \"" . $path . "\", title: '" . $title . "', artist: '" . $artist . "', length: '" . $length . "'" ) unless ( $length && $title && $artist && $path );
 			#reset directory path for songnode to phone path construction, if phone playlist
 			if ( $dirPath =~ m#phone_music#i ) {
-				$path =~ s#\\\\DavisServer_1\\Movies_Music_Pics\\phone_music\\Music\\#/storage/emulated/0/Music/#i;
+				#determine if playlist 'Music' folder is in "steph-after-school" folder
+				if ( $dirPath =~ m#steph-after-school#i ) {
+					$path =~ s#\\\\DavisServer_1\\Movies_Music_Pics\\phone_music\\steph-after-school\\Music\\#/storage/emulated/0/Music/#i;
+				} else {
+					$path =~ s#\\\\DavisServer_1\\Movies_Music_Pics\\phone_music\\Music\\#/storage/emulated/0/Music/#i;
+				}
 				$path =~ s#\\#/#g;
 			}
+			#set number for each songnode, after 'path' is determined
+			$m3uNum{$path} = ( $songNode->findvalue( './@number' ) );
 			#add to m3u hash keyed by path
 			$m3uItem{$path} = '#EXTINF:' . $length . ',' . $title . ' - ' . $artist . "\n" . $path . "\n";
 			$m3uTitle{$path} = $title;
